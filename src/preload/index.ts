@@ -17,7 +17,9 @@ const api: TrinoIdeApi = {
   deleteFolder: (id) => ipcRenderer.invoke('saved:deleteFolder', id),
   createQuery: (input) => ipcRenderer.invoke('saved:createQuery', input),
   updateQuery: (input) => ipcRenderer.invoke('saved:updateQuery', input),
-  deleteQuery: (id) => ipcRenderer.invoke('saved:deleteQuery', id)
+  deleteQuery: (id) => ipcRenderer.invoke('saved:deleteQuery', id),
+  getSettings: () => ipcRenderer.invoke('settings:get'),
+  updateSettings: (patch) => ipcRenderer.invoke('settings:update', patch)
 }
 
 if (process.contextIsolated) {

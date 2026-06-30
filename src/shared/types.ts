@@ -44,9 +44,19 @@ export interface QueryResultPayload {
   columns: QueryColumn[]
   rows: unknown[][]
   rowCount: number
-  /** 행 상한(MAX_ROWS)에 도달해 결과가 잘렸는지 여부 */
+  /** 수신 상한에 도달해 결과가 잘렸는지 여부(비페이지네이션 모드) */
   truncated: boolean
   stats?: QueryStatsSummary
+  /** 서버에서 OFFSET/LIMIT 래핑(페이지네이션)이 적용됐는지 */
+  paginated: boolean
+  /** 0-based 현재 페이지 (비페이지네이션이면 0) */
+  page: number
+  /** 페이지 크기(= LIMIT). 비페이지네이션이면 null */
+  pageSize: number | null
+  /** 다음 페이지가 더 있을 수 있는지 */
+  hasNext: boolean
+  /** 페이지네이션인데 원본에 ORDER BY가 없어 순서가 보장되지 않을 수 있음 */
+  orderByWarning: boolean
 }
 
 export interface RunQueryRequest {
@@ -54,6 +64,18 @@ export interface RunQueryRequest {
   sql: string
   /** Renderer가 발급하는 요청 식별자. 취소(query:cancel) 시 사용 */
   requestId: string
+  /** 받을 결과 행 상한(= 페이지 크기). null이면 무제한. 미지정 시 main이 설정값을 사용 */
+  rowLimit?: number | null
+  /** 요청 페이지(0-based). rowLimit이 숫자이고 SELECT/WITH일 때만 페이지네이션 적용 */
+  page?: number
+  /** 히스토리에 기록할지. 페이지 이동 재실행 시 false로 보내 중복 기록 방지 */
+  recordHistory?: boolean
+}
+
+/** 앱 전역 설정 */
+export interface AppSettings {
+  /** 기본 결과 행 상한. null이면 무제한 */
+  rowLimit: number | null
 }
 
 /** 쿼리 실행 1건의 기록. host가 지워져도 표시할 수 있도록 hostName을 함께 보관한다. */
@@ -127,4 +149,6 @@ export interface TrinoIdeApi {
   createQuery(input: CreateQueryInput): Promise<SavedQuery>
   updateQuery(input: UpdateQueryInput): Promise<SavedQuery>
   deleteQuery(id: string): Promise<void>
+  getSettings(): Promise<AppSettings>
+  updateSettings(patch: Partial<AppSettings>): Promise<AppSettings>
 }

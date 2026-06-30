@@ -51,22 +51,34 @@ renderer (React)  ──IPC──▶  main process  ──HTTP──▶  Trino
 ### 레이어와 책임 (`src/`)
 - `shared/types.ts` — main과 renderer가 **공유하는 타입 전용** 모듈(런타임 코드 금지). `HostConfig`/`HostInput`/`QueryResultPayload`/`IpcResult<T>`/`TrinoIdeApi`의 단일 출처.
 - `main/index.ts` — 앱 생명주기, BrowserWindow 생성. dev면 `ELECTRON_RENDERER_URL` 로드, 아니면 `out/renderer/index.html`.
-- `main/ipc.ts` — 모든 IPC 핸들러 등록. host 입력을 접속 정보(`ResolvedConn`)로 **복호화**하고, 실행 중 쿼리를 `requestId → {token, conn}` 맵으로 추적해 취소를 지원한다. `query:run`은 **성공/실패 모두 `history` 저장소에 자동 기록**한다.
-- `main/trino/client.ts` — `trino-client`로 쿼리 실행. `runQuery()`가 `trino.query()`의 async iterator(nextUri 페이징)를 돌며 columns/data/stats를 누적. `MAX_ROWS`(50,000) 초과 시 서버 쿼리를 `cancel`하고 `truncated` 표시.
+- `main/ipc.ts` — 모든 IPC 핸들러 등록. host 입력을 접속 정보(`ResolvedConn`)로 **복호화**하고, 실행 중 쿼리를 `requestId → {token, conn}` 맵으로 추적해 취소를 지원한다. `query:run`은 **성공/실패 모두 `history` 저장소에 자동 기록**(단 `recordHistory=false`면 생략 — 페이지 이동 재실행용)하고, **페이지네이션**을 적용한다(아래).
+- `main/trino/client.ts` — `trino-client`로 쿼리 실행. `runQuery(conn, sql, token, rowLimit)`가 `trino.query()`의 async iterator(nextUri 페이징)를 돌며 columns/data/stats를 누적. `rowLimit`(숫자) 도달 시 서버 쿼리를 `cancel`하고 `truncated` 표시, `rowLimit === null`이면 무제한 수신. 기본값 `DEFAULT_ROW_LIMIT`(300). 페이지네이션 헬퍼 `canPaginate`/`wrapPaginated`/`hasOrderBy`도 여기 있다.
+
+### 페이지네이션 (방식 B — 매 페이지 OFFSET/LIMIT 재실행)
+- `rowLimit`이 **숫자(=페이지 크기)**이고 SQL이 **SELECT/WITH 단일 문**(`canPaginate`)일 때만 활성. 무제한/비SELECT(SHOW/DESCRIBE/DDL 등)는 비활성(단일 실행).
+- ipc가 원본 SQL을 `SELECT * FROM ( <원본> ) AS _trino_ide_page OFFSET page*size LIMIT size+1`로 래핑(`wrapPaginated`). **+1행을 받아 `hasNext` 판정** 후 size로 잘라낸다.
+- Trino는 결과 커서가 없어 페이지마다 쿼리를 **재실행**한다(stateless). `ORDER BY`가 없으면 페이지 간 순서가 보장되지 않아 `orderByWarning`으로 경고. 큰 OFFSET일수록 서버 재연산 비용↑.
+- renderer는 `result.page`/`hasNext`로 ◀▶ 이동, 페이지 이동 시 `query:run`에 `page±1` + `recordHistory:false`로 재요청한다.
+- `main/store/settings.ts` — 앱 전역 설정(`<userData>/settings.json`). 현재 `rowLimit`(기본 300, `null`=무제한). `getSettings`/`updateSettings`.
 - `main/store/hosts.ts` — host 영속화. `<userData>/hosts.json` 평문 + 비밀번호만 `safeStorage`(OS 키체인)로 암호화해 `enc:<base64>`로 저장. 키체인 불가 환경은 `plain:<base64>` 폴백(난독화 수준).
 - `main/store/history.ts` — 쿼리 실행 기록 영속화. `<userData>/history.json`에 **최신순**으로 저장, 최근 `MAX_HISTORY`(200)개만 유지. `addHistory`/`listHistory`/`deleteHistory`/`clearHistory`.
 - `main/store/savedQueries.ts` — 저장 쿼리 라이브러리(`<userData>/saved-queries.json`). 1단계 `폴더(QueryFolder)` + 폴더 소속 `SavedQuery`. 폴더 삭제 시 안의 쿼리 **연쇄삭제**, `createQuery`는 대상 폴더가 없으면 거부.
 - `preload/index.ts` — `window.api`(=`TrinoIdeApi`) 노출. `preload/index.d.ts`가 `Window.api` 전역 타입 보강.
-- `renderer/src/` — React UI. `App.tsx`가 상태/오케스트레이션, 나머지는 표현 컴포넌트:
-  - `Sidebar` (좌측 Hosts/History/Saved **탭** 래퍼) → `HostList` / `HistoryList` / `SavedPanel`
-  - `HostList` (host 목록/선택/추가/편집/삭제)
+- `renderer/src/` — React UI. **보편적 DB IDE 레이아웃**: 좌측 `ActivityRail`(아이콘) + `explorer`(섹션 패널) + `workspace`(에디터/결과) + 하단 `StatusBar`. `App.tsx`가 상태/오케스트레이션:
+  - `ActivityRail` (Connections/Saved/History 섹션 전환). explorer 헤더(제목+추가 액션)는 `App`이 섹션별로 렌더.
+  - `HostList` (연결 목록/선택/편집/삭제) — 추가는 헤더 +, 선택은 `App.selectedHostId` 갱신(에디터 툴바 드롭다운과 동기).
   - `HistoryList` (실행 기록; **클릭=에디터 로드, 더블클릭=재실행**, 삭제된 host는 표시만)
-  - `SavedPanel` (폴더 트리; 폴더 생성/이름변경/삭제, 쿼리 **클릭=로드/더블클릭=실행**·이름변경·삭제. 폴더/쿼리 이름은 `window.prompt`)
-  - `SaveQueryDialog` (에디터 "💾 저장" → 이름 + 폴더 선택/새 폴더)
-  - `HostDialog` (host 폼 + 연결 테스트)
-  - `SqlEditor` (CodeMirror, ⌘↵/Ctrl+↵ 실행, 💾 저장 버튼)
-  - `ResultPanel` (결과 그리드 + 통계, DOM 보호용 `DISPLAY_LIMIT` 2,000행)
-  - 저장 쿼리는 host와 무관 → 더블클릭 실행은 **현재 선택된 host**로 실행한다.
+  - `SavedPanel` (폴더 트리; 쿼리 **클릭=로드/더블클릭=실행**·이름변경·삭제. 폴더 생성은 헤더 +)
+  - `SqlEditor` (탭 스트립 + 툴바[연결 드롭다운·LIMIT 콤보박스+무제한 토글·저장·실행] + CodeMirror). CodeMirror 크롬은 `lib/cmTheme.ts`로 토큰화. ⌘↵/Ctrl+↵ 실행.
+  - `ResultsPane` (서브탭 **Results/Messages** + **타입 인지 그리드**[숫자 우정렬·타입 라벨·NULL·행번호 sticky] + **계기판 푸터**[◀ Page n ▶ · rows · time · scan · bytes]). DOM 보호용 `DISPLAY_LIMIT` 2,000행. `orderByWarning` 배너.
+  - `StatusBar` (연결 라이브 점·이름·URL / rows·elapsed·page). 실행 중 점은 앰버 pulse.
+  - `SaveQueryDialog` / `HostDialog` / `PromptDialog` (모달). **주의: Electron은 `window.prompt` 미지원** → 이름 입력은 `PromptDialog`로. `confirm`/`alert`는 동작.
+  - `icons.tsx` (16px 스트로크 SVG 세트).
+  - 저장 쿼리는 host와 무관 → 더블클릭 실행은 **현재 선택된 host**로.
+
+### 디자인 시스템
+- 토큰은 `styles.css` `:root`(층진 그래파이트 bg + 단일 틸 `--accent` + 절제된 앰버 신호 + 데이터 타입색). 컴포넌트는 이 CSS 변수만 쓴다.
+- 폰트: UI=**Inter**, 코드/데이터/수치=**JetBrains Mono**(`@fontsource/*`, `main.tsx`에서 import해 오프라인 번들). 데이터 그리드·통계·에디터는 mono.
 
 ### IPC 계약
 모든 채널은 `ipcRenderer.invoke`(요청/응답). 쿼리/테스트는 throw 대신 `IpcResult<T>`(`{ok,value} | {ok,error}`)로 실패를 표현한다.
@@ -89,6 +101,8 @@ renderer (React)  ──IPC──▶  main process  ──HTTP──▶  Trino
 | `saved:createQuery` | `CreateQueryInput` → `SavedQuery` |
 | `saved:updateQuery` | `UpdateQueryInput` → `SavedQuery` |
 | `saved:deleteQuery` | `id` → void |
+| `settings:get` | → `AppSettings{rowLimit}` |
+| `settings:update` | `Partial<AppSettings>` → `AppSettings` |
 
 새 기능을 추가할 때는 보통 **4곳을 같이 고친다**: `shared/types.ts`(타입/`TrinoIdeApi`) → `main/ipc.ts`(핸들러) → `preload/index.ts`(브리지) → renderer 호출부.
 

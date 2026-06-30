@@ -1,8 +1,8 @@
 import { Trino, BasicAuth, type QueryError, type QueryResult } from 'trino-client'
 import type { QueryResultPayload } from '@shared/types'
 
-/** 결과 행을 메모리에 모으는 상한. 초과 시 서버 쿼리를 취소하고 truncated 처리. */
-const MAX_ROWS = 50_000
+/** rowLimit 미지정 시 사용할 기본 수신 상한. */
+const DEFAULT_ROW_LIMIT = 300
 
 /** 비밀번호까지 복호화가 끝난, Trino 접속에 필요한 모든 값 */
 export interface ResolvedConn {
@@ -46,7 +46,9 @@ function toError(e: QueryError): Error {
 export async function runQuery(
   conn: ResolvedConn,
   sql: string,
-  token: CancelToken
+  token: CancelToken,
+  /** 받을 행 상한. null이면 무제한. undefined면 기본값 사용 */
+  rowLimit: number | null = DEFAULT_ROW_LIMIT
 ): Promise<QueryResultPayload> {
   const trino = buildTrino(conn)
   const iter = await trino.query({
@@ -72,7 +74,7 @@ export async function runQuery(
     if (page.stats) lastStats = page.stats
     if (page.data) {
       for (const row of page.data as unknown[][]) {
-        if (rows.length >= MAX_ROWS) {
+        if (rowLimit != null && rows.length >= rowLimit) {
           truncated = true
           break
         }
@@ -103,8 +105,33 @@ export async function runQuery(
           processedRows: lastStats.processedRows,
           processedBytes: lastStats.processedBytes
         }
-      : undefined
+      : undefined,
+    // 페이지네이션 메타는 ipc 레이어에서 채운다(기본: 비페이지네이션)
+    paginated: false,
+    page: 0,
+    pageSize: null,
+    hasNext: false,
+    orderByWarning: false
   }
+}
+
+/** SELECT/WITH 단일 문이면 OFFSET/LIMIT 래핑이 가능 */
+export function canPaginate(sql: string): boolean {
+  const s = sql.trim().replace(/;\s*$/, '')
+  if (s.includes(';')) return false // 다중 문은 제외
+  return /^(select|with)\b/i.test(s)
+}
+
+/** 원본 쿼리를 서브쿼리로 감싸 OFFSET/LIMIT 부여 */
+export function wrapPaginated(sql: string, offset: number, limit: number): string {
+  const inner = sql.trim().replace(/;\s*$/, '')
+  // inner와 OFFSET을 줄바꿈으로 분리해 inner 끝의 줄주석(--)이 삼키지 않게 함
+  return `SELECT * FROM (\n${inner}\n) AS _trino_ide_page\nOFFSET ${offset} LIMIT ${limit}`
+}
+
+/** 원본 쿼리에 ORDER BY가 보이는지(대략) — 없으면 페이지 순서 경고 */
+export function hasOrderBy(sql: string): boolean {
+  return /\border\s+by\b/i.test(sql)
 }
 
 export async function cancelQuery(conn: ResolvedConn, trinoQueryId: string): Promise<void> {

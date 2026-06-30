@@ -5,7 +5,7 @@ import type {
   QueryResultPayload,
   RunQueryRequest
 } from '@shared/types'
-import type { CreateQueryInput, UpdateQueryInput } from '@shared/types'
+import type { AppSettings, CreateQueryInput, UpdateQueryInput } from '@shared/types'
 import { decryptPassword, deleteHost, getStoredHost, listHosts, saveHost } from './store/hosts'
 import { addHistory, clearHistory, deleteHistory, listHistory } from './store/history'
 import {
@@ -17,7 +17,16 @@ import {
   renameFolder,
   updateQuery
 } from './store/savedQueries'
-import { type CancelToken, type ResolvedConn, cancelQuery, runQuery } from './trino/client'
+import { getSettings, updateSettings } from './store/settings'
+import {
+  type CancelToken,
+  type ResolvedConn,
+  canPaginate,
+  cancelQuery,
+  hasOrderBy,
+  runQuery,
+  wrapPaginated
+} from './trino/client'
 
 /** 진행 중인 쿼리: requestId -> 토큰 + 접속 정보(서버 측 취소에 필요) */
 const active = new Map<string, { token: CancelToken; conn: ResolvedConn }>()
@@ -83,30 +92,59 @@ export function registerIpcHandlers(): void {
       const conn = toConn(stored)
       active.set(req.requestId, { token, conn })
       const ranAt = Date.now()
+      // 요청에 rowLimit이 오면 그 값을, 없으면 저장된 기본 설정을 사용
+      const rowLimit = req.rowLimit !== undefined ? req.rowLimit : getSettings().rowLimit
+      const page = req.page ?? 0
+      const recordHistory = req.recordHistory ?? true
+
+      // 페이지네이션: rowLimit이 숫자이고 SELECT/WITH 단일 문일 때만 OFFSET/LIMIT 래핑
+      const paginate = typeof rowLimit === 'number' && rowLimit > 0 && canPaginate(req.sql)
+      // 다음 페이지 존재 판단을 위해 1행 더 받아본다
+      const execSql = paginate ? wrapPaginated(req.sql, page * rowLimit, rowLimit + 1) : req.sql
+      const fetchCap = paginate ? rowLimit + 1 : rowLimit
+
       try {
-        const value = await runQuery(conn, req.sql, token)
-        // 모든 실행을 자동 기록 (성공)
-        addHistory({
-          sql: req.sql,
-          hostId: req.hostId,
-          hostName: stored.name,
-          ranAt,
-          ok: true,
-          rowCount: value.rowCount,
-          elapsedMs: value.stats?.elapsedMs
-        })
+        const value = await runQuery(conn, execSql, token, fetchCap)
+
+        if (paginate) {
+          const limit = rowLimit as number
+          const hasNext = value.rows.length > limit
+          if (hasNext) value.rows = value.rows.slice(0, limit)
+          value.rowCount = value.rows.length
+          value.truncated = false
+          value.paginated = true
+          value.page = page
+          value.pageSize = limit
+          value.hasNext = hasNext
+          value.orderByWarning = !hasOrderBy(req.sql)
+        } else {
+          value.pageSize = typeof rowLimit === 'number' ? rowLimit : null
+        }
+
+        if (recordHistory) {
+          addHistory({
+            sql: req.sql,
+            hostId: req.hostId,
+            hostName: stored.name,
+            ranAt,
+            ok: true,
+            rowCount: value.rowCount,
+            elapsedMs: value.stats?.elapsedMs
+          })
+        }
         return { ok: true, value }
       } catch (e) {
         const error = errorMessage(e)
-        // 모든 실행을 자동 기록 (실패도 — 고쳐서 재실행할 수 있도록)
-        addHistory({
-          sql: req.sql,
-          hostId: req.hostId,
-          hostName: stored.name,
-          ranAt,
-          ok: false,
-          error
-        })
+        if (recordHistory) {
+          addHistory({
+            sql: req.sql,
+            hostId: req.hostId,
+            hostName: stored.name,
+            ranAt,
+            ok: false,
+            error
+          })
+        }
         return { ok: false, error }
       } finally {
         active.delete(req.requestId)
@@ -136,4 +174,8 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('saved:createQuery', (_e, input: CreateQueryInput) => createQuery(input))
   ipcMain.handle('saved:updateQuery', (_e, input: UpdateQueryInput) => updateQuery(input))
   ipcMain.handle('saved:deleteQuery', (_e, id: string) => deleteQuery(id))
+
+  // ----- settings -----
+  ipcMain.handle('settings:get', () => getSettings())
+  ipcMain.handle('settings:update', (_e, patch: Partial<AppSettings>) => updateSettings(patch))
 }

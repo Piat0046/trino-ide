@@ -3,7 +3,6 @@ import type { QueryFolder, SavedLibrary, SavedQuery } from '@shared/types'
 
 interface Props {
   library: SavedLibrary
-  onCreateFolder: () => void
   onRenameFolder: (folder: QueryFolder) => void
   onDeleteFolder: (folder: QueryFolder) => void
   /** 현재 에디터 SQL을 이 폴더에 새 쿼리로 저장 */
@@ -16,7 +15,6 @@ interface Props {
 
 export function SavedPanel({
   library,
-  onCreateFolder,
   onRenameFolder,
   onDeleteFolder,
   onAddQuery,
@@ -25,7 +23,6 @@ export function SavedPanel({
   onRenameQuery,
   onDeleteQuery
 }: Props): JSX.Element {
-  // 폴더 접힘 상태(로컬). 기본은 모두 펼침.
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
 
   const toggle = (id: string): void => {
@@ -42,13 +39,14 @@ export function SavedPanel({
 
   return (
     <div className="panel">
-      <div className="panel-action">
-        <button className="block-btn" onClick={onCreateFolder}>
-          ＋ 새 폴더
-        </button>
-      </div>
-      <ul className="saved-list">
-        {library.folders.length === 0 && <li className="empty">폴더가 없습니다.</li>}
+      <ul className="list">
+        {library.folders.length === 0 && (
+          <li className="empty">
+            폴더가 없습니다.
+            <br />
+            상단 + 로 폴더를 만드세요.
+          </li>
+        )}
         {library.folders.map((folder) => {
           const isCollapsed = collapsed.has(folder.id)
           const queries = queriesOf(folder.id)
@@ -97,6 +95,7 @@ export function SavedPanel({
                       onDoubleClick={() => onRunQuery(q)}
                       title="클릭: 에디터에 로드 · 더블클릭: 실행"
                     >
+                      <span className="dot" />
                       <span className="query-name">{q.name}</span>
                       <div className="row-actions">
                         <button
@@ -105,7 +104,7 @@ export function SavedPanel({
                             onRunQuery(q)
                           }}
                         >
-                          ▶
+                          실행
                         </button>
                         <button
                           onClick={(e) => {
