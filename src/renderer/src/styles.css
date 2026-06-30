@@ -512,29 +512,71 @@ select {
   height: 36px;
   background: var(--bg-1);
   border-bottom: 1px solid var(--border);
-  padding-left: 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.tabstrip::-webkit-scrollbar {
+  height: 0;
 }
 .tab {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 14px;
+  padding: 0 10px 0 14px;
   font-size: 12px;
-  color: var(--text-1);
+  color: var(--text-2);
   border-right: 1px solid var(--border);
-  background: var(--bg-2);
+  background: var(--bg-1);
   position: relative;
-  max-width: 240px;
+  max-width: 220px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.tab:hover {
+  background: var(--bg-2);
+  color: var(--text-1);
+}
+.tab.active {
+  background: var(--bg-2);
+  color: var(--text-0);
 }
 .tab .tab-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.tab-trailing {
+  display: inline-flex;
+  align-items: center;
+  width: 18px;
+  height: 18px;
+  justify-content: center;
+  flex-shrink: 0;
+}
 .tab .tab-dirty {
   color: var(--accent);
-  font-size: 16px;
-  line-height: 0;
+  font-size: 9px;
+}
+.tab .tab-close {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  display: none;
+  place-items: center;
+  background: transparent;
+  border: none;
+  border-radius: var(--r-sm);
+  color: var(--text-2);
+}
+.tab:hover .tab-close {
+  display: grid;
+}
+.tab:hover .tab-dirty {
+  display: none;
+}
+.tab .tab-close:hover {
+  background: var(--bg-4);
+  color: var(--text-0);
 }
 .tab.active::after {
   content: '';
@@ -544,6 +586,21 @@ select {
   top: 0;
   height: 2px;
   background: var(--accent);
+}
+.tab-new {
+  width: 34px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  border: none;
+  border-right: 1px solid var(--border);
+  border-radius: 0;
+  color: var(--text-2);
+}
+.tab-new:hover {
+  background: var(--bg-2);
+  color: var(--text-0);
 }
 
 .toolbar {

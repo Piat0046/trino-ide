@@ -73,3 +73,12 @@ export const IconChevronLeft = ({ size }: IconProps): JSX.Element =>
 
 export const IconChevronRight = ({ size }: IconProps): JSX.Element =>
   svg(<path d="M9 6l6 6-6 6" />, size)
+
+export const IconX = ({ size }: IconProps): JSX.Element =>
+  svg(
+    <>
+      <path d="M6 6l12 12" />
+      <path d="M18 6L6 18" />
+    </>,
+    size
+  )

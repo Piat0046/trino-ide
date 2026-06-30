@@ -4,7 +4,6 @@ import type {
   HostConfig,
   HostInput,
   QueryFolder,
-  QueryResultPayload,
   SavedLibrary,
   SavedQuery
 } from '@shared/types'
@@ -18,11 +17,12 @@ import { ResultsPane } from './components/ResultsPane'
 import { StatusBar } from './components/StatusBar'
 import { SaveQueryDialog, type SaveQueryResult } from './components/SaveQueryDialog'
 import { PromptDialog } from './components/PromptDialog'
+import { CloseTabDialog } from './components/CloseTabDialog'
 import { IconPlus } from './components/icons'
+import { type EditorTab, isDirty, makeBound, makeScratch, nextUntitled } from './lib/tabs'
 
 const api = window.api
 
-const DEFAULT_SQL = 'SELECT 1'
 const EMPTY_LIBRARY: SavedLibrary = { folders: [], queries: [] }
 
 interface PromptConfig {
@@ -45,15 +45,25 @@ export default function App(): JSX.Element {
   const [promptState, setPromptState] = useState<PromptConfig | null>(null)
   const [rowLimit, setRowLimit] = useState<number | null>(300)
 
-  const [sql, setSql] = useState(DEFAULT_SQL)
-  const [loaded, setLoaded] = useState<{ name: string; sql: string } | null>(null)
-  const [running, setRunning] = useState(false)
-  const [result, setResult] = useState<QueryResultPayload | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [requestId, setRequestId] = useState<string | null>(null)
-  // 페이지 이동 재실행에 쓸, 마지막으로 "실행한" 쿼리(에디터 편집과 무관)
-  const [lastRun, setLastRun] = useState<{ sql: string; hostId: string } | null>(null)
+  // ----- 멀티 탭 -----
+  const [tabs, setTabs] = useState<EditorTab[]>(() => [
+    makeScratch('SELECT 1', null, 'Untitled query 1')
+  ])
+  const [activeTabId, setActiveTabId] = useState<string | null>(null)
+  const [closingTabId, setClosingTabId] = useState<string | null>(null)
+  const [pendingCloseTabId, setPendingCloseTabId] = useState<string | null>(null)
 
+  const activeTab = tabs.find((t) => t.id === activeTabId) ?? tabs[0]
+  const activeId = activeTab?.id ?? ''
+
+  const updateTab = useCallback((id: string, patch: Partial<EditorTab>): void => {
+    setTabs((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)))
+  }, [])
+
+  const tabTitle = (t: EditorTab): string =>
+    t.savedQueryId ? (library.queries.find((q) => q.id === t.savedQueryId)?.name ?? t.title) : t.title
+
+  // ----- refresh -----
   const refreshHosts = useCallback(async () => {
     const list = await api.listHosts()
     setHosts(list)
@@ -68,6 +78,23 @@ export default function App(): JSX.Element {
     void refreshSaved()
     void api.getSettings().then((s) => setRowLimit(s.rowLimit))
   }, [refreshHosts, refreshHistory, refreshSaved])
+
+  // host가 로드되면 hostId 없는 탭에 기본 연결 채움
+  useEffect(() => {
+    if (!selectedHostId) return
+    setTabs((prev) => prev.map((t) => (t.hostId ? t : { ...t, hostId: selectedHostId })))
+  }, [selectedHostId])
+
+  // library 변경 시: 삭제된 저장 쿼리에 바인딩된 탭은 스크래치로 변환(작업 보존)
+  useEffect(() => {
+    setTabs((prev) =>
+      prev.map((t) =>
+        t.savedQueryId && !library.queries.some((q) => q.id === t.savedQueryId)
+          ? { ...t, savedQueryId: null, baseSql: '' }
+          : t
+      )
+    )
+  }, [library])
 
   const changeRowLimit = (limit: number | null): void => {
     setRowLimit(limit)
@@ -87,7 +114,7 @@ export default function App(): JSX.Element {
     const saved = await api.saveHost(input)
     setDialogOpen(false)
     await refreshHosts()
-    setSelectedHostId(saved.id)
+    selectHost(saved.id)
   }
   const handleDeleteHost = async (h: HostConfig): Promise<void> => {
     await api.deleteHost(h.id)
@@ -95,68 +122,159 @@ export default function App(): JSX.Element {
     await refreshHosts()
   }
 
-  // ----- query execution -----
+  const selectHost = (id: string): void => {
+    if (activeId) updateTab(activeId, { hostId: id })
+    setSelectedHostId(id)
+  }
+
+  // ----- 탭 조작 -----
+  const newScratchTab = (): void => {
+    const name = nextUntitled(tabs.map((t) => t.title))
+    const tab = makeScratch('', activeTab?.hostId ?? selectedHostId, name)
+    setTabs((prev) => [...prev, tab])
+    setActiveTabId(tab.id)
+  }
+
+  /** 저장 쿼리를 탭으로 연다(이미 열려 있으면 그 탭 포커스). 연 탭을 반환 */
+  const openSaved = (q: SavedQuery): EditorTab => {
+    const existing = tabs.find((t) => t.savedQueryId === q.id)
+    if (existing) {
+      setActiveTabId(existing.id)
+      return existing
+    }
+    const tab = makeBound(q, selectedHostId)
+    setTabs((prev) => [...prev, tab])
+    setActiveTabId(tab.id)
+    return tab
+  }
+
+  const doCloseTab = (id: string): void => {
+    const idx = tabs.findIndex((t) => t.id === id)
+    const next = tabs.filter((t) => t.id !== id)
+    if (next.length === 0) {
+      const fresh = makeScratch('', selectedHostId, 'Untitled query 1')
+      setTabs([fresh])
+      setActiveTabId(fresh.id)
+      return
+    }
+    setTabs(next)
+    if (activeId === id) setActiveTabId(next[Math.min(idx, next.length - 1)].id)
+  }
+
+  const closeTab = (id: string): void => {
+    const t = tabs.find((x) => x.id === id)
+    if (!t) return
+    if (isDirty(t)) setClosingTabId(id)
+    else doCloseTab(id)
+  }
+
+  // ----- query execution (탭별) -----
   const executeQuery = async (
+    tabId: string,
     sqlText: string,
     hostId: string,
     page: number,
     recordHistory: boolean
   ): Promise<void> => {
-    if (running) return
     const id = crypto.randomUUID()
-    setRequestId(id)
-    setRunning(true)
-    setError(null)
+    updateTab(tabId, { running: true, requestId: id, error: null })
     try {
       const res = await api.runQuery({ hostId, sql: sqlText, requestId: id, rowLimit, page, recordHistory })
-      if (res.ok) setResult(res.value)
-      else {
-        setError(res.error)
-        setResult(null)
-      }
+      if (res.ok) updateTab(tabId, { result: res.value, error: null })
+      else updateTab(tabId, { error: res.error, result: null })
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-      setResult(null)
+      updateTab(tabId, { error: e instanceof Error ? e.message : String(e), result: null })
     } finally {
-      setRunning(false)
-      setRequestId(null)
+      updateTab(tabId, { running: false, requestId: null })
       if (recordHistory) void refreshHistory()
     }
   }
 
-  const runFresh = (sqlText: string, hostId: string): void => {
-    setLastRun({ sql: sqlText, hostId })
-    void executeQuery(sqlText, hostId, 0, true)
+  const runFresh = (tabId: string, sqlText: string, hostId: string): void => {
+    updateTab(tabId, { lastRun: { sql: sqlText, hostId } })
+    void executeQuery(tabId, sqlText, hostId, 0, true)
   }
 
   const runQuery = (): void => {
-    if (selectedHostId) runFresh(sql, selectedHostId)
+    const t = activeTab
+    if (!t || t.running || !t.hostId) return
+    runFresh(t.id, t.sql, t.hostId)
   }
   const cancelQuery = async (): Promise<void> => {
-    if (requestId) await api.cancelQuery(requestId)
+    if (activeTab?.requestId) await api.cancelQuery(activeTab.requestId)
   }
   const goToPage = (page: number): void => {
-    if (lastRun && page >= 0) void executeQuery(lastRun.sql, lastRun.hostId, page, false)
+    const t = activeTab
+    if (!t?.lastRun || page < 0) return
+    void executeQuery(t.id, t.lastRun.sql, t.lastRun.hostId, page, false)
   }
 
-  // ----- editor / tab -----
-  const onSqlChange = (value: string): void => setSql(value)
-  const loadIntoEditor = (name: string | null, sqlText: string): void => {
-    setSql(sqlText)
-    setLoaded(name ? { name, sql: sqlText } : null)
+  // ----- 저장(💾) -----
+  const onSave = async (): Promise<void> => {
+    const t = activeTab
+    if (!t) return
+    if (t.savedQueryId) {
+      await api.updateQuery({ id: t.savedQueryId, sql: t.sql })
+      updateTab(t.id, { baseSql: t.sql })
+      await refreshSaved()
+    } else {
+      setSaveDialogOpen(true)
+    }
   }
-  const dirty = loaded !== null && sql !== loaded.sql
-  const queryName = loaded?.name ?? null
+  const handleSaveQuery = async (res: SaveQueryResult): Promise<void> => {
+    const t = activeTab
+    if (!t) return
+    let folderId = res.folderId
+    if (res.newFolderName) folderId = (await api.createFolder(res.newFolderName)).id
+    if (!folderId) return
+    const created = await api.createQuery({ folderId, name: res.name, sql: t.sql })
+    await refreshSaved()
+    updateTab(t.id, { savedQueryId: created.id, title: res.name, baseSql: t.sql })
+    setSaveDialogOpen(false)
+    setSection('saved')
+    if (pendingCloseTabId === t.id) {
+      doCloseTab(t.id)
+      setPendingCloseTabId(null)
+    }
+  }
 
-  // ----- history actions -----
+  // ----- 닫기 확인 모달 동작 -----
+  const closingTab = tabs.find((t) => t.id === closingTabId) ?? null
+  const confirmDiscard = (): void => {
+    if (closingTabId) doCloseTab(closingTabId)
+    setClosingTabId(null)
+  }
+  const confirmSave = async (): Promise<void> => {
+    const t = closingTab
+    setClosingTabId(null)
+    if (!t) return
+    if (t.savedQueryId) {
+      await api.updateQuery({ id: t.savedQueryId, sql: t.sql })
+      updateTab(t.id, { baseSql: t.sql })
+      await refreshSaved()
+      doCloseTab(t.id)
+    } else {
+      // 스크래치 → 다른 이름으로 저장 후 닫기
+      setActiveTabId(t.id)
+      setPendingCloseTabId(t.id)
+      setSaveDialogOpen(true)
+    }
+  }
+
+  // ----- history actions (항상 새 스크래치 탭) -----
+  const openHistoryTab = (entry: HistoryEntry): EditorTab => {
+    const hostId = hosts.some((h) => h.id === entry.hostId) ? entry.hostId : selectedHostId
+    const tab = makeScratch(entry.sql, hostId, nextUntitled(tabs.map((t) => t.title)))
+    setTabs((prev) => [...prev, tab])
+    setActiveTabId(tab.id)
+    return tab
+  }
   const loadHistory = (entry: HistoryEntry): void => {
-    loadIntoEditor(null, entry.sql)
-    if (hosts.some((h) => h.id === entry.hostId)) setSelectedHostId(entry.hostId)
+    openHistoryTab(entry)
   }
   const runHistory = (entry: HistoryEntry): void => {
-    loadIntoEditor(null, entry.sql)
-    if (hosts.some((h) => h.id === entry.hostId)) setSelectedHostId(entry.hostId)
-    runFresh(entry.sql, entry.hostId)
+    const tab = openHistoryTab(entry)
+    if (tab.hostId) runFresh(tab.id, tab.sql, tab.hostId)
   }
   const deleteHistory = async (id: string): Promise<void> => {
     await api.deleteHistory(id)
@@ -169,7 +287,7 @@ export default function App(): JSX.Element {
     }
   }
 
-  // ----- saved query actions (window.prompt 미지원 → 모달) -----
+  // ----- saved query actions -----
   const askName = (cfg: PromptConfig): void => setPromptState(cfg)
   const createFolder = (): void =>
     askName({
@@ -195,26 +313,25 @@ export default function App(): JSX.Element {
     await api.deleteFolder(folder.id)
     await refreshSaved()
   }
-  const addQueryToFolder = (folder: QueryFolder): void => {
-    if (!sql.trim()) {
-      window.alert('에디터가 비어 있습니다.')
+  // 폴더에 빈 SQL 새 쿼리 생성 후 그 탭 열기
+  const createQueryInFolder = async (folder: QueryFolder): Promise<void> => {
+    const taken = [...tabs.map((t) => t.title), ...library.queries.map((q) => q.name)]
+    const created = await api.createQuery({ folderId: folder.id, name: nextUntitled(taken), sql: '' })
+    await refreshSaved()
+    setSection('saved')
+    openSaved(created)
+  }
+  const loadSaved = (q: SavedQuery): void => {
+    openSaved(q)
+  }
+  const runSaved = (q: SavedQuery): void => {
+    const tab = openSaved(q)
+    const hostId = tab.hostId ?? selectedHostId
+    if (!hostId) {
+      window.alert('먼저 연결을 선택하세요.')
       return
     }
-    askName({
-      title: `'${folder.name}'에 쿼리 저장`,
-      placeholder: '쿼리 이름',
-      onSubmit: async (name) => {
-        await api.createQuery({ folderId: folder.id, name, sql })
-        await refreshSaved()
-        setLoaded({ name, sql })
-      }
-    })
-  }
-  const loadSaved = (q: SavedQuery): void => loadIntoEditor(q.name, q.sql)
-  const runSaved = (q: SavedQuery): void => {
-    loadIntoEditor(q.name, q.sql)
-    if (selectedHostId) runFresh(q.sql, selectedHostId)
-    else window.alert('먼저 연결을 선택하세요.')
+    runFresh(tab.id, tab.sql, hostId)
   }
   const renameSaved = (q: SavedQuery): void =>
     askName({
@@ -231,18 +348,10 @@ export default function App(): JSX.Element {
     await api.deleteQuery(q.id)
     await refreshSaved()
   }
-  const handleSaveQuery = async (res: SaveQueryResult): Promise<void> => {
-    let folderId = res.folderId
-    if (res.newFolderName) folderId = (await api.createFolder(res.newFolderName)).id
-    if (!folderId) return
-    await api.createQuery({ folderId, name: res.name, sql })
-    await refreshSaved()
-    setLoaded({ name: res.name, sql })
-    setSaveDialogOpen(false)
-    setSection('saved')
-  }
 
-  const selectedHost = hosts.find((h) => h.id === selectedHostId) ?? null
+  const activeHostId = activeTab?.hostId ?? null
+  const selectedHost = hosts.find((h) => h.id === activeHostId) ?? null
+  const tabViews = tabs.map((t) => ({ id: t.id, title: tabTitle(t), dirty: isDirty(t) }))
 
   const explorerHeader = (): JSX.Element => {
     if (section === 'connections') {
@@ -290,8 +399,8 @@ export default function App(): JSX.Element {
           {section === 'connections' && (
             <HostList
               hosts={hosts}
-              selectedHostId={selectedHostId}
-              onSelect={setSelectedHostId}
+              selectedHostId={activeHostId}
+              onSelect={selectHost}
               onEdit={openEdit}
               onDelete={handleDeleteHost}
             />
@@ -301,7 +410,7 @@ export default function App(): JSX.Element {
               library={library}
               onRenameFolder={renameFolder}
               onDeleteFolder={deleteFolder}
-              onAddQuery={addQueryToFolder}
+              onAddQuery={createQueryInFolder}
               onLoadQuery={loadSaved}
               onRunQuery={runSaved}
               onRenameQuery={renameSaved}
@@ -321,31 +430,40 @@ export default function App(): JSX.Element {
 
         <div className="workspace">
           <SqlEditor
-            sql={sql}
-            onChange={onSqlChange}
+            tabs={tabViews}
+            activeTabId={activeId}
+            onSelectTab={setActiveTabId}
+            onCloseTab={closeTab}
+            onNewTab={newScratchTab}
+            sql={activeTab?.sql ?? ''}
+            onChange={(v) => activeId && updateTab(activeId, { sql: v })}
             onRun={runQuery}
             onCancel={cancelQuery}
-            onSave={() => setSaveDialogOpen(true)}
-            running={running}
+            onSave={onSave}
+            running={activeTab?.running ?? false}
+            isScratch={activeTab ? activeTab.savedQueryId === null : true}
             hosts={hosts}
-            selectedHostId={selectedHostId}
-            onSelectHost={setSelectedHostId}
+            hostId={activeHostId}
+            onSelectHost={selectHost}
             rowLimit={rowLimit}
             onRowLimitChange={changeRowLimit}
-            queryName={queryName}
-            dirty={dirty}
           />
           <ResultsPane
-            result={result}
-            error={error}
-            running={running}
-            onPrevPage={() => result && goToPage(result.page - 1)}
-            onNextPage={() => result && goToPage(result.page + 1)}
+            result={activeTab?.result ?? null}
+            error={activeTab?.error ?? null}
+            running={activeTab?.running ?? false}
+            onPrevPage={() => activeTab?.result && goToPage(activeTab.result.page - 1)}
+            onNextPage={() => activeTab?.result && goToPage(activeTab.result.page + 1)}
           />
         </div>
       </div>
 
-      <StatusBar selectedHost={selectedHost} running={running} result={result} error={error} />
+      <StatusBar
+        selectedHost={selectedHost}
+        running={activeTab?.running ?? false}
+        result={activeTab?.result ?? null}
+        error={activeTab?.error ?? null}
+      />
 
       {dialogOpen && (
         <HostDialog
@@ -358,8 +476,11 @@ export default function App(): JSX.Element {
       {saveDialogOpen && (
         <SaveQueryDialog
           folders={library.folders}
-          sqlPreview={sql}
-          onClose={() => setSaveDialogOpen(false)}
+          sqlPreview={activeTab?.sql ?? ''}
+          onClose={() => {
+            setSaveDialogOpen(false)
+            setPendingCloseTabId(null)
+          }}
           onSave={handleSaveQuery}
         />
       )}
@@ -373,6 +494,14 @@ export default function App(): JSX.Element {
             await promptState.onSubmit(value)
             setPromptState(null)
           }}
+        />
+      )}
+      {closingTab && (
+        <CloseTabDialog
+          tabTitle={tabTitle(closingTab)}
+          onSave={confirmSave}
+          onDiscard={confirmDiscard}
+          onCancel={() => setClosingTabId(null)}
         />
       )}
     </div>

@@ -64,12 +64,19 @@ renderer (React)  ──IPC──▶  main process  ──HTTP──▶  Trino
 - `main/store/history.ts` — 쿼리 실행 기록 영속화. `<userData>/history.json`에 **최신순**으로 저장, 최근 `MAX_HISTORY`(200)개만 유지. `addHistory`/`listHistory`/`deleteHistory`/`clearHistory`.
 - `main/store/savedQueries.ts` — 저장 쿼리 라이브러리(`<userData>/saved-queries.json`). 1단계 `폴더(QueryFolder)` + 폴더 소속 `SavedQuery`. 폴더 삭제 시 안의 쿼리 **연쇄삭제**, `createQuery`는 대상 폴더가 없으면 거부.
 - `preload/index.ts` — `window.api`(=`TrinoIdeApi`) 노출. `preload/index.d.ts`가 `Window.api` 전역 타입 보강.
+### 멀티 탭 에디터 모델 (`renderer/src/lib/tabs.ts`)
+- **탭 1개 = 독립 SQL 문서**(`EditorTab`). `savedQueryId!=null`이면 저장 쿼리 **바인딩** 탭, null이면 미저장 **스크래치** 탭. `dirty = sql !== baseSql`.
+- **탭별 상태**: `sql`/`baseSql`/`hostId`/`result`/`error`/`running`/`requestId`/`lastRun`. **전역**: `hosts`/`selectedHostId`/`rowLimit`/`library`/`history`. → 즉 **결과·연결은 탭마다, LIMIT은 전역**.
+- 저장 쿼리 클릭 = **open-or-focus**(같은 쿼리가 열려 있으면 그 탭 포커스, 아니면 새 탭). 히스토리·새 탭은 항상 새 스크래치. 폴더 `＋쿼리`는 **빈 SQL** 쿼리를 `Untitled query N`으로 즉시 생성→바인딩 탭으로 연다.
+- 저장(💾): 스크래치면 `SaveQueryDialog`로 저장 후 그 탭을 **리바인딩**, 바인딩이면 `updateQuery`로 **덮어쓰기**. 닫기: dirty면 `CloseTabDialog`(저장/저장안함/취소), 마지막 탭 닫으면 새 스크래치 자동 생성. 저장 쿼리가 삭제되면 열린 탭은 **스크래치로 변환**(작업 보존, `App`의 reconcile effect).
+
 - `renderer/src/` — React UI. **보편적 DB IDE 레이아웃**: 좌측 `ActivityRail`(아이콘) + `explorer`(섹션 패널) + `workspace`(에디터/결과) + 하단 `StatusBar`. `App.tsx`가 상태/오케스트레이션:
   - `ActivityRail` (Connections/Saved/History 섹션 전환). explorer 헤더(제목+추가 액션)는 `App`이 섹션별로 렌더.
   - `HostList` (연결 목록/선택/편집/삭제) — 추가는 헤더 +, 선택은 `App.selectedHostId` 갱신(에디터 툴바 드롭다운과 동기).
   - `HistoryList` (실행 기록; **클릭=에디터 로드, 더블클릭=재실행**, 삭제된 host는 표시만)
   - `SavedPanel` (폴더 트리; 쿼리 **클릭=로드/더블클릭=실행**·이름변경·삭제. 폴더 생성은 헤더 +)
-  - `SqlEditor` (탭 스트립 + 툴바[연결 드롭다운·LIMIT 콤보박스+무제한 토글·저장·실행] + CodeMirror). CodeMirror 크롬은 `lib/cmTheme.ts`로 토큰화. ⌘↵/Ctrl+↵ 실행.
+  - `SqlEditor` (`EditorTabs` 탭 스트립 + 툴바[연결 드롭다운·LIMIT 콤보박스+무제한 토글·저장·실행] + CodeMirror). CodeMirror 크롬은 `lib/cmTheme.ts`로 토큰화. ⌘↵ 실행 / ⌘S 저장.
+  - `EditorTabs` (멀티 탭 스트립 + 새 탭 `+`), `CloseTabDialog` (dirty 탭 닫기 3버튼 확인).
   - `ResultsPane` (서브탭 **Results/Messages** + **타입 인지 그리드**[숫자 우정렬·타입 라벨·NULL·행번호 sticky] + **계기판 푸터**[◀ Page n ▶ · rows · time · scan · bytes]). DOM 보호용 `DISPLAY_LIMIT` 2,000행. `orderByWarning` 배너.
   - `StatusBar` (연결 라이브 점·이름·URL / rows·elapsed·page). 실행 중 점은 앰버 pulse.
   - `SaveQueryDialog` / `HostDialog` / `PromptDialog` (모달). **주의: Electron은 `window.prompt` 미지원** → 이름 입력은 `PromptDialog`로. `confirm`/`alert`는 동작.

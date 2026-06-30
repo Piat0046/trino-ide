@@ -58,7 +58,7 @@ export function SavedPanel({
                 <span className="folder-count">{queries.length}</span>
                 <div className="row-actions">
                   <button
-                    title="현재 에디터 쿼리를 이 폴더에 저장"
+                    title="이 폴더에 새 쿼리 만들기 (빈 SQL)"
                     onClick={(e) => {
                       e.stopPropagation()
                       onAddQuery(folder)
@@ -93,7 +93,7 @@ export function SavedPanel({
                       className="query-row"
                       onClick={() => onLoadQuery(q)}
                       onDoubleClick={() => onRunQuery(q)}
-                      title="클릭: 에디터에 로드 · 더블클릭: 실행"
+                      title="클릭: 탭으로 열기 · 더블클릭: 실행"
                     >
                       <span className="dot" />
                       <span className="query-name">{q.name}</span>
