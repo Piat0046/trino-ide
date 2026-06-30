@@ -1,0 +1,26 @@
+# 의존성
+node_modules/
+
+# 빌드 산출물
+# electron-vite (main/preload/renderer) → out/
+out/
+# 일반 빌드 출력(사용 시)
+dist/
+# electron-builder 패키징 산출물 (.dmg / .zip / .app)
+release/
+
+# 로그
+*.log
+npm-debug.log*
+
+# 환경변수 / 시크릿
+.env
+.env.*
+!.env.example
+
+# TypeScript 증분 빌드 정보
+*.tsbuildinfo
+
+# 에디터 / OS
+.DS_Store
+.idea/

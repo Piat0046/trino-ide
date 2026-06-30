@@ -1,0 +1,40 @@
+{
+  "name": "trino-ide",
+  "version": "0.1.0",
+  "description": "Trino 전용 데스크톱 IDE — host 관리 및 쿼리 결과 조회",
+  "main": "./out/main/index.js",
+  "author": "jack.park",
+  "license": "MIT",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "start": "electron-vite preview",
+    "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
+    "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
+    "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "dist": "electron-vite build && electron-builder",
+    "dist:dir": "electron-vite build && electron-builder --dir"
+  },
+  "dependencies": {
+    "trino-client": "^0.2.9"
+  },
+  "overrides": {
+    "axios": "^1.18.1"
+  },
+  "devDependencies": {
+    "@codemirror/lang-sql": "^6.10.0",
+    "@types/node": "^26.0.1",
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "@uiw/react-codemirror": "^4.25.10",
+    "@vitejs/plugin-react": "^5.2.0",
+    "electron": "^42.5.1",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^5.0.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "^6.0.3",
+    "vite": "^7.3.6"
+  }
+}

@@ -1,0 +1,132 @@
+import { useState, type FormEvent } from 'react'
+import type { HostConfig, HostInput, IpcResult, QueryResultPayload } from '@shared/types'
+
+interface Props {
+  host: HostConfig | null
+  onClose: () => void
+  onSave: (input: HostInput) => Promise<void>
+  onTest: (input: HostInput) => Promise<IpcResult<QueryResultPayload>>
+}
+
+type TestState = 'idle' | 'testing' | 'ok' | 'fail'
+
+export function HostDialog({ host, onClose, onSave, onTest }: Props): JSX.Element {
+  const [name, setName] = useState(host?.name ?? '')
+  const [url, setUrl] = useState(host?.url ?? 'http://localhost:8080')
+  const [user, setUser] = useState(host?.user ?? '')
+  const [catalog, setCatalog] = useState(host?.catalog ?? '')
+  const [schema, setSchema] = useState(host?.schema ?? '')
+  const [password, setPassword] = useState('')
+  const [insecure, setInsecure] = useState(host?.insecure ?? false)
+  const [testState, setTestState] = useState<TestState>('idle')
+  const [testMsg, setTestMsg] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const buildInput = (): HostInput => ({
+    id: host?.id,
+    name: name.trim(),
+    url: url.trim(),
+    user: user.trim(),
+    catalog: catalog.trim() || undefined,
+    schema: schema.trim() || undefined,
+    insecure,
+    password: password || undefined
+  })
+
+  const valid = name.trim() && url.trim() && user.trim()
+
+  const handleTest = async (): Promise<void> => {
+    setTestState('testing')
+    setTestMsg('')
+    const res = await onTest(buildInput())
+    if (res.ok) {
+      setTestState('ok')
+      setTestMsg('연결 성공 (SELECT 1)')
+    } else {
+      setTestState('fail')
+      setTestMsg(res.error)
+    }
+  }
+
+  const handleSubmit = async (e: FormEvent): Promise<void> => {
+    e.preventDefault()
+    if (!valid || saving) return
+    setSaving(true)
+    try {
+      await onSave(buildInput())
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={handleSubmit}>
+        <h2>{host ? 'Host 편집' : 'Host 추가'}</h2>
+
+        <label>
+          이름
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="prod-trino" required />
+        </label>
+        <label>
+          서버 URL
+          <input
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="http://localhost:8080"
+            required
+          />
+        </label>
+        <label>
+          사용자
+          <input value={user} onChange={(e) => setUser(e.target.value)} placeholder="trino" required />
+        </label>
+
+        <div className="row">
+          <label>
+            Catalog
+            <input value={catalog} onChange={(e) => setCatalog(e.target.value)} placeholder="hive" />
+          </label>
+          <label>
+            Schema
+            <input value={schema} onChange={(e) => setSchema(e.target.value)} placeholder="default" />
+          </label>
+        </div>
+
+        <label>
+          비밀번호
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder={host?.hasPassword ? '저장됨 — 변경 시에만 입력' : '없으면 비워두세요'}
+          />
+        </label>
+
+        <label className="checkbox">
+          <input type="checkbox" checked={insecure} onChange={(e) => setInsecure(e.target.checked)} />
+          인증서 검증 무시 (https self-signed)
+        </label>
+
+        {testState !== 'idle' && (
+          <div className={'test-result ' + testState}>
+            {testState === 'testing' ? '연결 테스트 중…' : testMsg}
+          </div>
+        )}
+
+        <div className="modal-actions">
+          <button type="button" onClick={handleTest} disabled={!valid || testState === 'testing'}>
+            연결 테스트
+          </button>
+          <span className="spacer" />
+          <button type="button" onClick={onClose}>
+            취소
+          </button>
+          <button type="submit" className="primary" disabled={!valid || saving}>
+            저장
+          </button>
+        </div>
+      </form>
+    </div>
+  )
+}

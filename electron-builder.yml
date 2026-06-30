@@ -1,0 +1,24 @@
+appId: com.trinoide.app
+productName: Trino IDE
+directories:
+  output: release
+  buildResources: build
+# 패키징에 포함할 앱 파일. 프로덕션 dependencies(node_modules)는
+# electron-builder가 package.json을 보고 자동 포함한다(trino-client, axios).
+files:
+  - out/**
+  - package.json
+asar: true
+mac:
+  target:
+    - target: dmg
+      arch:
+        - arm64
+    - target: zip
+      arch:
+        - arm64
+  category: public.app-category.developer-tools
+  # 코드 서명 없이 로컬 사용. electron-builder가 ad-hoc(codesign -) 서명만 적용한다.
+  identity: null
+dmg:
+  title: ${productName}
