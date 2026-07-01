@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import CodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror'
-import { sql } from '@codemirror/lang-sql'
+import { autocompletion } from '@codemirror/autocomplete'
 import type { HostConfig } from '@shared/types'
 import { cmTheme } from '../lib/cmTheme'
 import { activeStatement } from '../lib/cmActiveStatement'
+import { trino } from '../lib/trinoDialect'
 import { statementAtCursor } from '../lib/sqlStatements'
 import { formatSql } from '../lib/formatSql'
 import { IconFormat, IconPlay, IconSave, IconStop } from './icons'
@@ -210,7 +211,12 @@ export function SqlEditor({
           value={sqlText}
           height="100%"
           theme="dark"
-          extensions={[sql(), cmTheme, activeStatement]}
+          extensions={[
+            trino,
+            cmTheme,
+            activeStatement,
+            autocompletion({ activateOnTyping: true, selectOnOpen: false })
+          ]}
           onChange={onChange}
         />
       </div>

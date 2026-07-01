@@ -25,7 +25,41 @@ export const cmTheme = EditorView.theme(
       backgroundColor: 'rgba(52, 211, 192, 0.20)'
     },
     '.cm-selectionMatch': { backgroundColor: 'rgba(52, 211, 192, 0.12)' },
-    '.cm-content': { caretColor: 'var(--accent)', padding: '10px 0' }
+    '.cm-content': { caretColor: 'var(--accent)', padding: '10px 0' },
+
+    // ----- 자동완성 팝업(Trino 키워드/타입/함수) -----
+    '.cm-tooltip.cm-tooltip-autocomplete': {
+      border: '1px solid var(--border-strong)',
+      borderRadius: 'var(--r-md)',
+      backgroundColor: 'var(--bg-1)',
+      boxShadow: '0 10px 28px rgba(0, 0, 0, 0.45)',
+      overflow: 'hidden'
+    },
+    '.cm-tooltip-autocomplete > ul': {
+      fontFamily: 'var(--mono)',
+      fontSize: '12px',
+      maxHeight: '17em'
+    },
+    '.cm-tooltip-autocomplete > ul > li': {
+      padding: '3px 8px',
+      color: 'var(--text-1)'
+    },
+    '.cm-tooltip-autocomplete ul li[aria-selected]': {
+      backgroundColor: 'var(--accent-dim)',
+      color: 'var(--text-0)'
+    },
+    '.cm-completionLabel': { color: 'inherit' },
+    // fuzzy 매칭된 글자를 밑줄 대신 틸로 강조 → 산발적 매칭이 한눈에 보임
+    '.cm-completionMatchedText': {
+      color: 'var(--accent)',
+      textDecoration: 'none',
+      fontWeight: '600'
+    },
+    '.cm-completionIcon': { paddingRight: '0.55em', opacity: '0.95' },
+    // 카테고리별 색: 함수=틸(동사), 타입=데이터타입색, 키워드=조용한 회색
+    '.cm-completionIcon-function::after': { color: 'var(--accent)' },
+    '.cm-completionIcon-type::after': { color: 'var(--t-time)' },
+    '.cm-completionIcon-keyword::after': { color: 'var(--text-2)' }
   },
   { dark: true }
 )
