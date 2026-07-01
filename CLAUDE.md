@@ -149,6 +149,22 @@ renderer (React)  ──IPC──▶  main process  ──HTTP──▶  Trino
 - 다른 OS/아키텍처(intel x64, Windows, Linux)는 `electron-builder.yml`의 `mac.target.arch`/`win`/`linux`를 추가. 단 Windows .exe는 macOS 크로스 빌드가 제한적이라 해당 OS에서 빌드 권장.
 - 앱 아이콘 미설정(기본 Electron 아이콘). 커스텀 아이콘은 `build/icon.icns` 추가.
 
+## 이슈 트래킹 / 기능 계획 워크플로
+새 기능/큰 변경은 **GitHub 이슈로 등록**한다. 저장소 `Piat0046/trino-ide`(issues 활성).
+
+- **구조: 에픽 이슈 + 네이티브 하위이슈(sub-issues) + 마일스톤(Phase).** 에픽(부모) 1개에 sub-issue를 연결하면 진행률이 자동 집계된다. Phase 구분은 각 하위 이슈에 마일스톤(`Phase 1`/`Phase 2` …)을 부여해 이중으로 얻는다.
+- 보통 흐름: **UI/UX 등 전문가 에이전트에게 구현 방안을 물어 종합 → 사용자와 핵심 결정 확정 → 에픽+하위이슈로 등록 → Phase 1부터 구현, 완료 시 해당 이슈 close.**
+- **인증 제약(확인됨)**: gh 토큰 스코프는 `repo`,`read:org`,`gist`. **`repo`로 sub-issues·milestones 모두 됨.** 단 **GitHub Projects는 `project` 스코프가 없어 불가** → 필요 시 `gh auth refresh -s project`(브라우저) 선행. Projects는 이 프로젝트 규모엔 과함(에픽+하위이슈로 충분).
+- **gh 레시피**(하위이슈 API는 `gh issue`에 없어 `gh api` 사용):
+  ```bash
+  # 마일스톤: gh api repos/OWNER/REPO/milestones -f title="Phase 1 — …"
+  # 에픽/이슈: gh issue create -R OWNER/REPO --title "[Epic] …" --body "…"
+  # 하위이슈 생성+마일스톤: gh issue create … --milestone "Phase 1 — …"
+  # 에픽에 연결: gh api repos/OWNER/REPO/issues/<EPIC_NUM>/sub_issues -F sub_issue_id=<CHILD_ID>
+  #   ⚠ sub_issue_id 는 이슈 '번호'가 아니라 REST id(큰 정수): gh api repos/OWNER/REPO/issues/<num> --jq .id
+  ```
+- 예시: 에픽 #1 "세로 2분할 워크스페이스(split view)" + Phase 1(#2–#8)/Phase 2(#9–#12) 하위이슈로 등록됨.
+
 ## 알려진 미구현/개선 여지
 - 결과 그리드는 가상 스크롤이 없어 `ResultPanel`의 `DISPLAY_LIMIT`(2,000행)까지만 그린다. 대용량은 가상화 도입 필요.
 - 코드 서명/공증(notarization) 미설정 — 외부 배포 시 필요.
