@@ -126,7 +126,7 @@ export function SqlEditor({
   }
 
   return (
-    <div className="editor-pane" onKeyDown={handleKeyDown}>
+    <div className={'editor-pane' + (split ? ' compact' : '')} onKeyDown={handleKeyDown}>
       <EditorTabs
         tabs={tabs}
         activeTabId={activeTabId}
@@ -173,19 +173,18 @@ export function SqlEditor({
             ))}
           </datalist>
           <label className="limit-unlimited" title="LIMIT 없이 받되 안전상 최대 5만 행까지 표시">
-
             <input
               type="checkbox"
               checked={unlimited}
               onChange={(e) => handleToggleUnlimited(e.target.checked)}
             />
-            제한하지 않음
+            <span className="limit-unlimited-text">제한하지 않음</span>
           </label>
         </div>
 
         <button onClick={handleFormat} disabled={!sqlText.trim()} title="포맷 (⇧⌘F)">
           <IconFormat size={14} />
-          포맷
+          <span className="btn-label">포맷</span>
         </button>
         <button
           onClick={onSave}
@@ -193,12 +192,12 @@ export function SqlEditor({
           title={isScratch ? '다른 이름으로 저장 (⌘S)' : '현재 쿼리에 저장 (⌘S)'}
         >
           <IconSave size={14} />
-          저장
+          <span className="btn-label">저장</span>
         </button>
         {running ? (
-          <button className="danger" onClick={onCancel}>
+          <button className="danger" onClick={onCancel} title="실행 중지">
             <IconStop size={13} />
-            중지
+            <span className="btn-label">중지</span>
           </button>
         ) : (
           <button
@@ -208,7 +207,7 @@ export function SqlEditor({
             title="현재 문장 실행 (⌘↵)"
           >
             <IconPlay size={13} />
-            실행
+            <span className="btn-label">실행</span>
           </button>
         )}
       </div>

@@ -595,11 +595,26 @@ select {
   height: 36px;
   background: var(--bg-1);
   border-bottom: 1px solid var(--border);
+  min-width: 0;
+}
+/* 탭 목록: 넘치면 여기서만 가로 스크롤 */
+.tabstrip-scroll {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: stretch;
   overflow-x: auto;
   overflow-y: hidden;
 }
-.tabstrip::-webkit-scrollbar {
+.tabstrip-scroll::-webkit-scrollbar {
   height: 0;
+}
+/* 고정 액션(새 탭·분할 토글) — 탭 개수와 무관하게 항상 보임 */
+.tabstrip-actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: stretch;
+  border-left: 1px solid var(--border);
 }
 .tab {
   display: flex;
@@ -684,11 +699,7 @@ select {
   background: var(--bg-2);
   color: var(--text-0);
 }
-.tab-strip-spacer {
-  flex: 1 1 auto;
-  min-width: 8px;
-}
-/* 세로 분할 토글(우상단) */
+/* 세로 분할 토글(고정 액션 섹션, 항상 표시) */
 .tab-split {
   width: 34px;
   flex-shrink: 0;
@@ -696,7 +707,6 @@ select {
   place-items: center;
   background: transparent;
   border: none;
-  border-left: 1px solid var(--border);
   border-radius: 0;
   color: var(--text-2);
 }
@@ -755,6 +765,28 @@ select {
 }
 .limit-unlimited input {
   width: auto;
+}
+
+/* 분할(좁은 창) 시 툴바 압축: 버튼 라벨·부가 텍스트 숨기고 아이콘만 */
+.editor-pane.compact .toolbar {
+  gap: 6px;
+  padding: 8px 10px;
+}
+.editor-pane.compact .toolbar .btn-label,
+.editor-pane.compact .toolbar .limit-unlimited-text,
+.editor-pane.compact .toolbar .limit-label {
+  display: none;
+}
+.editor-pane.compact .toolbar button {
+  padding: 5px 8px;
+}
+.editor-pane.compact .toolbar .conn-select {
+  width: auto;
+  min-width: 88px;
+  flex: 0 1 190px;
+}
+.editor-pane.compact .toolbar .limit-input {
+  width: 56px;
 }
 
 .cm-host {
