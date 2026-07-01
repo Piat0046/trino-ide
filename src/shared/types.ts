@@ -128,6 +128,22 @@ export interface UpdateQueryInput {
   folderId?: string
 }
 
+/** 실행 중 서버가 보내는 진행 상황(스트리밍). requestId로 탭을 찾는다. */
+export interface QueryProgress {
+  requestId: string
+  stats: QueryStatsSummary
+}
+
+/** 구조화된 쿼리 에러. line/column은 Trino가 준 위치(있을 때만). */
+export interface QueryErrorInfo {
+  message: string
+  errorName?: string
+  errorType?: string
+  errorCode?: number
+  line?: number
+  column?: number
+}
+
 /** 텍스트 파일 저장 요청(내보내기) */
 export interface SaveTextInput {
   /** 저장 다이얼로그 기본 파일명(확장자 포함) */
@@ -140,8 +156,10 @@ export interface SaveFileResult {
   path?: string
 }
 
-/** IPC 경계에서 throw 대신 명시적으로 성공/실패를 표현 */
-export type IpcResult<T> = { ok: true; value: T } | { ok: false; error: string }
+/** IPC 경계에서 throw 대신 명시적으로 성공/실패를 표현. errorInfo는 구조화된 부가정보(있을 때). */
+export type IpcResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; error: string; errorInfo?: QueryErrorInfo }
 
 /** preload가 contextBridge로 노출하는 window.api의 형태 */
 export interface TrinoIdeApi {
@@ -167,4 +185,6 @@ export interface TrinoIdeApi {
   copyToClipboard(text: string): Promise<void>
   /** 저장 다이얼로그를 열어 텍스트를 파일로 저장(내보내기) */
   saveTextFile(input: SaveTextInput): Promise<SaveFileResult>
+  /** 실행 진행 상황 이벤트 구독. 반환값 호출로 구독 해제. */
+  onQueryProgress(cb: (progress: QueryProgress) => void): () => void
 }

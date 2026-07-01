@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import type { QueryColumn, QueryResultPayload } from '@shared/types'
+import type {
+  QueryColumn,
+  QueryErrorInfo,
+  QueryResultPayload,
+  QueryStatsSummary
+} from '@shared/types'
 import {
   IconArrowDown,
   IconArrowUp,
@@ -9,7 +14,8 @@ import {
   IconColumns,
   IconCopy,
   IconDownload,
-  IconEyeOff
+  IconEyeOff,
+  IconStop
 } from './icons'
 
 const api = window.api
@@ -17,7 +23,10 @@ const api = window.api
 interface Props {
   result: QueryResultPayload | null
   error: string | null
+  errorInfo: QueryErrorInfo | null
   running: boolean
+  progress: QueryStatsSummary | null
+  onCancel: () => void
   onPrevPage: () => void
   onNextPage: () => void
 }
@@ -99,9 +108,29 @@ function buildDefaultCols(result: QueryResultPayload): ColConfig[] {
   })
 }
 
-export function ResultsPane({ result, error, running, onPrevPage, onNextPage }: Props): JSX.Element {
+export function ResultsPane({
+  result,
+  error,
+  errorInfo,
+  running,
+  progress,
+  onCancel,
+  onPrevPage,
+  onNextPage
+}: Props): JSX.Element {
   const [tab, setTab] = useState<'results' | 'messages'>('results')
   const parentRef = useRef<HTMLDivElement>(null)
+
+  // 실행 중 라이브 경과 타이머(월클럭). 실행이 시작되면 0부터 카운트업.
+  const [elapsed, setElapsed] = useState(0)
+  const runStartRef = useRef(0)
+  useEffect(() => {
+    if (!running) return
+    runStartRef.current = Date.now()
+    setElapsed(0)
+    const iv = setInterval(() => setElapsed(Date.now() - runStartRef.current), 100)
+    return () => clearInterval(iv)
+  }, [running])
 
   const [colState, setColState] = useState<{ sig: string; cols: ColConfig[] }>({ sig: '', cols: [] })
   const [menuOpen, setMenuOpen] = useState(false)
@@ -420,12 +449,38 @@ export function ResultsPane({ result, error, running, onPrevPage, onNextPage }: 
       <div className="results-body">
         {running ? (
           <div className="results-status">
-            <span className="spin" />
-            실행 중…
+            <div className="run-overlay">
+              <span className="spin" />
+              <div className="run-info">
+                <div className="run-elapsed">{(elapsed / 1000).toFixed(1)}s</div>
+                <div className="run-meta">
+                  {progress?.state ?? '실행 준비 중'}
+                  {progress?.processedRows != null &&
+                    ` · ${progress.processedRows.toLocaleString()} rows 스캔`}
+                  {progress?.processedBytes != null && ` · ${formatBytes(progress.processedBytes)}`}
+                </div>
+              </div>
+              <button className="danger" onClick={onCancel} title="실행 중지">
+                <IconStop size={13} />
+                중지
+              </button>
+            </div>
           </div>
         ) : tab === 'messages' ? (
           error ? (
-            <pre className="messages error">{error}</pre>
+            <div className="messages error-card">
+              <div className="err-head">
+                <span className="err-name">{errorInfo?.errorName ?? '쿼리 실패'}</span>
+                {errorInfo?.errorType && <span className="err-type">{errorInfo.errorType}</span>}
+                {errorInfo?.line != null && (
+                  <span className="err-loc">
+                    line {errorInfo.line}
+                    {errorInfo.column != null ? `:${errorInfo.column}` : ''}
+                  </span>
+                )}
+              </div>
+              <pre className="err-msg">{error}</pre>
+            </div>
           ) : result ? (
             <div className="messages">
               <div className="ok-line">✓ 완료 · {stats?.state ?? 'FINISHED'}</div>

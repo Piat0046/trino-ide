@@ -21,7 +21,12 @@ const api: TrinoIdeApi = {
   getSettings: () => ipcRenderer.invoke('settings:get'),
   updateSettings: (patch) => ipcRenderer.invoke('settings:update', patch),
   copyToClipboard: (text) => ipcRenderer.invoke('clipboard:write', text),
-  saveTextFile: (input) => ipcRenderer.invoke('file:saveText', input)
+  saveTextFile: (input) => ipcRenderer.invoke('file:saveText', input),
+  onQueryProgress: (cb) => {
+    const listener = (_e: unknown, payload: Parameters<typeof cb>[0]): void => cb(payload)
+    ipcRenderer.on('query:progress', listener)
+    return () => ipcRenderer.removeListener('query:progress', listener)
+  }
 }
 
 if (process.contextIsolated) {

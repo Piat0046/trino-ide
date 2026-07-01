@@ -1109,6 +1109,80 @@ body.col-resizing * {
   color: var(--ok);
 }
 
+/* ----- 실행 경험: 라이브 오버레이 + 구조화 에러 카드 ----- */
+.run-overlay {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-1);
+}
+.run-overlay .spin {
+  margin-right: 0;
+}
+.run-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+}
+.run-elapsed {
+  font-family: var(--mono);
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-0);
+  font-variant-numeric: tabular-nums;
+}
+.run-meta {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-2);
+}
+.messages.error-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  color: var(--text-1);
+}
+.err-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.err-name {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--danger);
+  padding: 2px 8px;
+  border: 1px solid var(--danger);
+  border-radius: var(--r-sm);
+  background: var(--danger-dim);
+}
+.err-type {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-2);
+}
+.err-loc {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--warn);
+}
+.err-msg {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-1);
+}
+
 /* 결과 푸터 = 계기판(transport) */
 .transport {
   display: flex;

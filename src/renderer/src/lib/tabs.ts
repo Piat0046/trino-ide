@@ -1,4 +1,4 @@
-import type { QueryResultPayload } from '@shared/types'
+import type { QueryErrorInfo, QueryResultPayload, QueryStatsSummary } from '@shared/types'
 
 /** 에디터 탭 1개 = 독립 SQL 문서. 저장 쿼리 바인딩(savedQueryId!=null) 또는 스크래치. */
 export interface EditorTab {
@@ -14,8 +14,12 @@ export interface EditorTab {
   hostId: string | null
   result: QueryResultPayload | null
   error: string | null
+  /** 구조화 에러(있을 때) */
+  errorInfo: QueryErrorInfo | null
   running: boolean
   requestId: string | null
+  /** 실행 중 라이브 진행 stats(스트리밍) */
+  progress: QueryStatsSummary | null
   lastRun: { sql: string; hostId: string } | null
 }
 
@@ -36,8 +40,10 @@ export function makeScratch(seedSql: string, hostId: string | null, title: strin
     hostId,
     result: null,
     error: null,
+    errorInfo: null,
     running: false,
     requestId: null,
+    progress: null,
     lastRun: null
   }
 }
@@ -55,8 +61,10 @@ export function makeBound(
     hostId,
     result: null,
     error: null,
+    errorInfo: null,
     running: false,
     requestId: null,
+    progress: null,
     lastRun: null
   }
 }

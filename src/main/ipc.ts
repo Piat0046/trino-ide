@@ -24,12 +24,14 @@ import { getSettings, updateSettings } from './store/settings'
 import {
   type CancelToken,
   type ResolvedConn,
+  TrinoQueryError,
   canPaginate,
   cancelQuery,
   hasOrderBy,
   runQuery,
   wrapPaginated
 } from './trino/client'
+import type { QueryErrorInfo } from '@shared/types'
 
 /** 진행 중인 쿼리: requestId -> 토큰 + 접속 정보(서버 측 취소에 필요) */
 const active = new Map<string, { token: CancelToken; conn: ResolvedConn }>()
@@ -87,7 +89,7 @@ export function registerIpcHandlers(): void {
   // ----- query -----
   ipcMain.handle(
     'query:run',
-    async (_e, req: RunQueryRequest): Promise<IpcResult<QueryResultPayload>> => {
+    async (event, req: RunQueryRequest): Promise<IpcResult<QueryResultPayload>> => {
       const stored = getStoredHost(req.hostId)
       if (!stored) return { ok: false, error: '등록된 host를 찾을 수 없습니다.' }
 
@@ -95,6 +97,10 @@ export function registerIpcHandlers(): void {
       const conn = toConn(stored)
       active.set(req.requestId, { token, conn })
       const ranAt = Date.now()
+      // 실행 중 진행 stats를 renderer로 스트리밍(단방향 이벤트)
+      const onProgress = (stats: QueryResultPayload['stats']): void => {
+        if (stats) event.sender.send('query:progress', { requestId: req.requestId, stats })
+      }
       // 요청에 rowLimit이 오면 그 값을, 없으면 저장된 기본 설정을 사용
       const rowLimit = req.rowLimit !== undefined ? req.rowLimit : getSettings().rowLimit
       const page = req.page ?? 0
@@ -110,7 +116,7 @@ export function registerIpcHandlers(): void {
       const fetchCap = paginate ? rowLimit + 1 : cap
 
       try {
-        const value = await runQuery(conn, execSql, token, fetchCap)
+        const value = await runQuery(conn, execSql, token, fetchCap, onProgress)
 
         if (paginate) {
           const limit = rowLimit as number
@@ -141,6 +147,18 @@ export function registerIpcHandlers(): void {
         return { ok: true, value }
       } catch (e) {
         const error = errorMessage(e)
+        let errorInfo: QueryErrorInfo | undefined
+        if (e instanceof TrinoQueryError) {
+          errorInfo = {
+            message: e.message,
+            errorName: e.errorName,
+            errorType: e.errorType,
+            errorCode: e.errorCode,
+            // 래핑(페이지네이션)된 SQL이면 line/column이 원본과 어긋나므로 숨긴다
+            line: paginate ? undefined : e.line,
+            column: paginate ? undefined : e.column
+          }
+        }
         if (recordHistory) {
           addHistory({
             sql: req.sql,
@@ -151,7 +169,7 @@ export function registerIpcHandlers(): void {
             error
           })
         }
-        return { ok: false, error }
+        return { ok: false, error, errorInfo }
       } finally {
         active.delete(req.requestId)
       }

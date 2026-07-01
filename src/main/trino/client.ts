@@ -1,5 +1,5 @@
 import { Trino, BasicAuth, type QueryError, type QueryResult } from 'trino-client'
-import type { QueryResultPayload } from '@shared/types'
+import type { QueryResultPayload, QueryStatsSummary } from '@shared/types'
 
 /** rowLimit 미지정 시 사용할 기본 수신 상한. */
 const DEFAULT_ROW_LIMIT = 300
@@ -32,10 +32,35 @@ function buildTrino(conn: ResolvedConn): Trino {
   })
 }
 
-function toError(e: QueryError): Error {
-  const err = new Error(e.message || e.errorName || 'Query failed')
-  err.name = e.errorName || 'TrinoQueryError'
-  return err
+/** 구조화 정보를 보존하는 Trino 쿼리 에러. ipc 레이어가 errorInfo로 변환한다. */
+export class TrinoQueryError extends Error {
+  errorName?: string
+  errorType?: string
+  errorCode?: number
+  line?: number
+  column?: number
+  constructor(e: QueryError) {
+    super(e.message || e.errorName || 'Query failed')
+    this.name = e.errorName || 'TrinoQueryError'
+    this.errorName = e.errorName
+    this.errorType = e.errorType
+    this.errorCode = e.errorCode
+    // errorLocation은 Trino 프로토콜의 런타임 필드(트리노-client 타입엔 없음)
+    const loc = (e as { errorLocation?: { lineNumber?: number; columnNumber?: number } }).errorLocation
+    this.line = loc?.lineNumber
+    this.column = loc?.columnNumber
+  }
+}
+
+function mapStats(s: QueryResult['stats']): QueryStatsSummary | undefined {
+  return s
+    ? {
+        state: s.state,
+        elapsedMs: s.elapsedTimeMillis,
+        processedRows: s.processedRows,
+        processedBytes: s.processedBytes
+      }
+    : undefined
 }
 
 /**
@@ -48,7 +73,9 @@ export async function runQuery(
   sql: string,
   token: CancelToken,
   /** 받을 행 상한. null이면 무제한. undefined면 기본값 사용 */
-  rowLimit: number | null = DEFAULT_ROW_LIMIT
+  rowLimit: number | null = DEFAULT_ROW_LIMIT,
+  /** 페이지마다 진행 stats를 흘려보낸다(라이브 피드백용) */
+  onProgress?: (stats: QueryStatsSummary) => void
 ): Promise<QueryResultPayload> {
   const trino = buildTrino(conn)
   const iter = await trino.query({
@@ -66,12 +93,18 @@ export async function runQuery(
   for await (const page of iter as AsyncIterable<QueryResult>) {
     if (page.id) token.trinoQueryId = page.id
     if (token.cancelled) break
-    if (page.error) throw toError(page.error)
+    if (page.error) throw new TrinoQueryError(page.error)
 
     if (page.columns && columns.length === 0) {
       columns = page.columns.map((c) => ({ name: c.name, type: c.type }))
     }
-    if (page.stats) lastStats = page.stats
+    if (page.stats) {
+      lastStats = page.stats
+      if (onProgress) {
+        const mapped = mapStats(page.stats)
+        if (mapped) onProgress(mapped)
+      }
+    }
     if (page.data) {
       for (const row of page.data as unknown[][]) {
         if (rowLimit != null && rows.length >= rowLimit) {
@@ -98,14 +131,7 @@ export async function runQuery(
     rows,
     rowCount: rows.length,
     truncated,
-    stats: lastStats
-      ? {
-          state: lastStats.state,
-          elapsedMs: lastStats.elapsedTimeMillis,
-          processedRows: lastStats.processedRows,
-          processedBytes: lastStats.processedBytes
-        }
-      : undefined,
+    stats: mapStats(lastStats),
     // 페이지네이션 메타는 ipc 레이어에서 채운다(기본: 비페이지네이션)
     paginated: false,
     page: 0,

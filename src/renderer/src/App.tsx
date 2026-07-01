@@ -91,6 +91,15 @@ export default function App(): JSX.Element {
     void api.getSettings().then((s) => setRowLimit(s.rowLimit))
   }, [refreshHosts, refreshHistory, refreshSaved])
 
+  // 실행 진행 stats 스트리밍 → 해당 requestId 탭에 반영
+  useEffect(() => {
+    return api.onQueryProgress((p) => {
+      setTabs((prev) =>
+        prev.map((t) => (t.requestId === p.requestId ? { ...t, progress: p.stats } : t))
+      )
+    })
+  }, [])
+
   // host가 로드되면 hostId 없는 탭에 기본 연결 채움
   useEffect(() => {
     if (!selectedHostId) return
@@ -189,15 +198,15 @@ export default function App(): JSX.Element {
     recordHistory: boolean
   ): Promise<void> => {
     const id = crypto.randomUUID()
-    updateTab(tabId, { running: true, requestId: id, error: null })
+    updateTab(tabId, { running: true, requestId: id, error: null, errorInfo: null, progress: null })
     try {
       const res = await api.runQuery({ hostId, sql: sqlText, requestId: id, rowLimit, page, recordHistory })
-      if (res.ok) updateTab(tabId, { result: res.value, error: null })
-      else updateTab(tabId, { error: res.error, result: null })
+      if (res.ok) updateTab(tabId, { result: res.value, error: null, errorInfo: null })
+      else updateTab(tabId, { error: res.error, errorInfo: res.errorInfo ?? null, result: null })
     } catch (e) {
       updateTab(tabId, { error: e instanceof Error ? e.message : String(e), result: null })
     } finally {
-      updateTab(tabId, { running: false, requestId: null })
+      updateTab(tabId, { running: false, requestId: null, progress: null })
       if (recordHistory) void refreshHistory()
     }
   }
@@ -522,7 +531,10 @@ export default function App(): JSX.Element {
           <ResultsPane
             result={activeTab?.result ?? null}
             error={activeTab?.error ?? null}
+            errorInfo={activeTab?.errorInfo ?? null}
             running={activeTab?.running ?? false}
+            progress={activeTab?.progress ?? null}
+            onCancel={cancelQuery}
             onPrevPage={() => activeTab?.result && goToPage(activeTab.result.page - 1)}
             onNextPage={() => activeTab?.result && goToPage(activeTab.result.page + 1)}
           />
