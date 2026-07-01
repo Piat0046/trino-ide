@@ -717,6 +717,125 @@ select {
   color: var(--danger);
 }
 
+/* 컬럼 표시/순서 메뉴 */
+.cols-menu-wrap {
+  position: relative;
+  margin-right: 4px;
+}
+.cols-btn {
+  height: 24px;
+  padding: 0 9px;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-1);
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+}
+.cols-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 20;
+  width: 244px;
+  max-height: 340px;
+  overflow: auto;
+  padding: 6px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+}
+.cols-menu-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 6px 8px;
+  margin-bottom: 4px;
+  font-size: 11px;
+  color: var(--text-2);
+  border-bottom: 1px solid var(--border);
+}
+.cols-menu-head button.ghost {
+  height: 22px;
+  padding: 0 8px;
+  font-size: 11px;
+  color: var(--accent);
+}
+.cols-menu ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.cols-menu label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  font-size: 12px;
+}
+.cols-menu label:hover {
+  background: var(--bg-3);
+}
+.cols-menu input {
+  width: auto;
+  flex-shrink: 0;
+}
+.cols-menu .colm-name {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--sans);
+  color: var(--text-0);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cols-menu .colm-type {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.03em;
+}
+.colm-type.t-num {
+  color: var(--t-num);
+}
+.colm-type.t-str {
+  color: var(--t-str);
+}
+.colm-type.t-time {
+  color: var(--t-time);
+}
+.colm-type.t-bool {
+  color: var(--t-bool);
+}
+
+/* 헤더 우클릭 컨텍스트 메뉴 */
+.ctx-menu {
+  position: fixed;
+  z-index: 40;
+  min-width: 150px;
+  padding: 4px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+}
+.ctx-item {
+  width: 100%;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 7px 10px;
+  font-size: 12px;
+  color: var(--text-0);
+  background: transparent;
+  border: none;
+  border-radius: var(--r-sm);
+}
+.ctx-item:hover:not(:disabled) {
+  background: var(--bg-3);
+  color: var(--text-0);
+}
+
 .results-body {
   flex: 1;
   min-height: 0;
@@ -776,6 +895,7 @@ select {
   background: var(--bg-1);
 }
 .g-hcell {
+  position: relative;
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -784,6 +904,32 @@ select {
   border-right: 1px solid var(--border);
   border-bottom: 1px solid var(--border-strong);
   overflow: hidden;
+  cursor: grab;
+  user-select: none;
+}
+.g-hcell:active {
+  cursor: grabbing;
+}
+.g-hcell.drop-target {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+/* 오른쪽 가장자리 리사이즈 핸들 */
+.col-resizer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 7px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 5;
+}
+.col-resizer:hover {
+  box-shadow: inset -2px 0 0 var(--accent);
+}
+body.col-resizing,
+body.col-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
 }
 .g-hcell .col-name {
   font-family: var(--sans);
@@ -821,6 +967,7 @@ select {
   justify-content: center;
   color: var(--text-2);
   border-right: 1px solid var(--border-strong);
+  cursor: default;
 }
 .grid2-body {
   position: relative;

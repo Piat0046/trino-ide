@@ -82,6 +82,7 @@ renderer (React)  ──IPC──▶  main process  ──HTTP──▶  Trino
     - 문장 분리는 `lib/sqlStatements.ts`의 토크나이저 `splitStatements`/`statementAtCursor`(문자열 `'…'`·식별자 `"…"`·`--`/`/* */` 주석 안의 `;`는 무시, `''`/`""` 이스케이프 처리) — 실행·하이라이트·인디케이터가 공유하는 순수 함수.
   - `EditorTabs` (멀티 탭 스트립 + 새 탭 `+`), `CloseTabDialog` (dirty 탭 닫기 3버튼 확인).
   - `ResultsPane` (서브탭 **Results/Messages** + **타입 인지 그리드**[숫자 우정렬·타입 라벨·NULL·헤더/행번호 sticky] + **계기판 푸터**[◀ Page n ▶ · rows · time · scan · bytes]). 그리드는 **`@tanstack/react-virtual` 가상 스크롤**(div 기반, 열 너비는 상위 300행 샘플로 미리 고정, `scrollMargin=HEAD_H`로 sticky 헤더 보정) — 받은 행 전체를 스크롤로 본다(DOM에는 보이는 ~30행만). `orderByWarning` 배너.
+    - **컬럼 조작**: 헤더 우측 가장자리 드래그로 **너비 조정**, 헤더 본문 드래그로 **순서 변경**, 우상단 **"열" 팝오버**(체크박스+초기화)로 **숨김/표시**, 헤더 **우클릭 컨텍스트 메뉴**(`.ctx-menu`, 마우스 위치 `fixed`)의 **"열 숨김"**으로 해당 열 즉시 숨김(바깥클릭·Esc·스크롤 시 닫힘). 상태는 `colState={sig, cols:ColConfig[]}`(각 `{origIndex,width,visible}`, 배열 순서=표시 순서)로 보관. **컬럼 시그니처**(이름+타입 목록)가 같으면 유지, 바뀌면 기본값 재구성 — 그래서 **같은 쿼리의 페이지 이동(동일 시그니처) 중에는 너비/순서/숨김이 유지**되고, 다른 모양의 새 쿼리면 초기화된다. header/body 모두 `visibleCols`를 `origIndex`로 렌더해 정렬 유지.
     - **무제한 수신은 ipc에서 50,000행 안전 상한**(`UNLIMITED_CAP`)으로 보호 → 초과 시 `truncated`로 "안전 상한 도달, LIMIT 사용" 안내. 더 큰 데이터는 숫자 LIMIT 페이지네이션으로 접근.
   - `StatusBar` (연결 라이브 점·이름·URL / rows·elapsed·page). 실행 중 점은 앰버 pulse.
   - `SaveQueryDialog` / `HostDialog` / `PromptDialog` (모달). **주의: Electron은 `window.prompt` 미지원** → 이름 입력은 `PromptDialog`로. `confirm`/`alert`는 동작.

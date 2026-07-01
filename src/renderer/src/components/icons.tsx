@@ -79,6 +79,26 @@ export const IconFormat = ({ size }: IconProps): JSX.Element =>
     size
   )
 
+export const IconColumns = ({ size }: IconProps): JSX.Element =>
+  svg(
+    <>
+      <rect x="4" y="5" width="16" height="14" rx="1.5" />
+      <path d="M10 5v14" />
+      <path d="M15 5v14" />
+    </>,
+    size
+  )
+
+export const IconEyeOff = ({ size }: IconProps): JSX.Element =>
+  svg(
+    <>
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" />
+      <circle cx="12" cy="12" r="3" />
+      <path d="M4 4l16 16" />
+    </>,
+    size
+  )
+
 export const IconChevronLeft = ({ size }: IconProps): JSX.Element =>
   svg(<path d="M15 6l-6 6 6 6" />, size)
 
