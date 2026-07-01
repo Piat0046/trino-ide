@@ -79,6 +79,15 @@ export const IconFormat = ({ size }: IconProps): JSX.Element =>
     size
   )
 
+export const IconSplit = ({ size }: IconProps): JSX.Element =>
+  svg(
+    <>
+      <rect x="4" y="5" width="16" height="14" rx="1.5" />
+      <path d="M12 5v14" />
+    </>,
+    size
+  )
+
 export const IconColumns = ({ size }: IconProps): JSX.Element =>
   svg(
     <>

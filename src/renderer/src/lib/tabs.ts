@@ -23,6 +23,17 @@ export interface EditorTab {
   lastRun: { sql: string; hostId: string } | null
 }
 
+/** 워크스페이스 분할 단위. 각 pane = 독립 탭 그룹(자체 활성 탭). 분할 시 panes.length===2. */
+export interface Pane {
+  id: string
+  tabs: EditorTab[]
+  activeTabId: string | null
+}
+
+export function makePane(tabs: EditorTab[]): Pane {
+  return { id: crypto.randomUUID(), tabs, activeTabId: tabs[0]?.id ?? null }
+}
+
 /** taken에 없는 "Untitled query N" 생성 */
 export function nextUntitled(taken: string[]): string {
   let n = 1

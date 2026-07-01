@@ -20,7 +20,15 @@ import { PromptDialog } from './components/PromptDialog'
 import { CloseTabDialog } from './components/CloseTabDialog'
 import { ConfirmDialog, type ConfirmConfig } from './components/ConfirmDialog'
 import { IconChevronLeft, IconPlus, IconTrash } from './components/icons'
-import { type EditorTab, isDirty, makeBound, makeScratch, nextUntitled } from './lib/tabs'
+import {
+  type EditorTab,
+  type Pane,
+  isDirty,
+  makeBound,
+  makePane,
+  makeScratch,
+  nextUntitled
+} from './lib/tabs'
 
 const api = window.api
 
@@ -61,20 +69,72 @@ export default function App(): JSX.Element {
   const askConfirm = (cfg: ConfirmConfig): void => setConfirmState(cfg)
   const [rowLimit, setRowLimit] = useState<number | null>(300)
 
-  // ----- 멀티 탭 -----
-  const [tabs, setTabs] = useState<EditorTab[]>(() => [
-    makeScratch('', null, 'Untitled query 1')
+  // ----- 멀티 탭 / 분할 pane -----
+  // panes.length===1 이면 단일 화면, 2 이면 세로 분할(#3~). focusedPane = 마지막으로 만진 창.
+  const [panes, setPanes] = useState<Pane[]>(() => [
+    makePane([makeScratch('', null, 'Untitled query 1')])
   ])
-  const [activeTabId, setActiveTabId] = useState<string | null>(null)
+  const [focusedPaneId, setFocusedPaneId] = useState<string>('')
   const [closingTabId, setClosingTabId] = useState<string | null>(null)
   const [pendingCloseTabId, setPendingCloseTabId] = useState<string | null>(null)
+  // 분할 시 왼쪽 pane 비율(0.3~0.7). 저장 대상 탭(pane별 스크래치 저장용)
+  const [splitRatio, setSplitRatio] = useState<number>(() => {
+    const v = Number(localStorage.getItem('wsSplitRatio'))
+    return Number.isFinite(v) && v >= 0.3 && v <= 0.7 ? v : 0.5
+  })
+  const [saveTargetTabId, setSaveTargetTabId] = useState<string | null>(null)
 
-  const activeTab = tabs.find((t) => t.id === activeTabId) ?? tabs[0]
+  // 포커스 pane과 그 활성 탭(파생). focusedPaneId가 아직 없으면 첫 pane.
+  const focusedPane = panes.find((p) => p.id === focusedPaneId) ?? panes[0]
+  const tabs = focusedPane.tabs
+  const activeTab = tabs.find((t) => t.id === focusedPane.activeTabId) ?? tabs[0]
   const activeId = activeTab?.id ?? ''
+  const allTitles = (): string[] => panes.flatMap((p) => p.tabs.map((t) => t.title))
 
+  // 탭 id는 전역 유일 → 모든 pane×tab을 스캔해 patch(어느 pane의 탭이든 갱신)
   const updateTab = useCallback((id: string, patch: Partial<EditorTab>): void => {
-    setTabs((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)))
+    setPanes((prev) =>
+      prev.map((p) => ({ ...p, tabs: p.tabs.map((t) => (t.id === id ? { ...t, ...patch } : t)) }))
+    )
   }, [])
+  // 포커스 pane의 활성 탭 지정
+  const setFocusedActive = (tabId: string): void =>
+    setPanes((prev) => prev.map((p) => (p.id === focusedPane.id ? { ...p, activeTabId: tabId } : p)))
+  // 포커스 pane에 탭 추가 + 활성화
+  const addTabToFocused = (tab: EditorTab): void =>
+    setPanes((prev) =>
+      prev.map((p) =>
+        p.id === focusedPane.id ? { ...p, tabs: [...p.tabs, tab], activeTabId: tab.id } : p
+      )
+    )
+  const activeTabOf = (p: Pane): EditorTab | undefined =>
+    p.tabs.find((t) => t.id === p.activeTabId) ?? p.tabs[0]
+  const updatePane = (paneId: string, patch: Partial<Pane>): void =>
+    setPanes((prev) => prev.map((p) => (p.id === paneId ? { ...p, ...patch } : p)))
+  const addTabToPane = (paneId: string, tab: EditorTab): void => {
+    setFocusedPaneId(paneId)
+    setPanes((prev) =>
+      prev.map((p) => (p.id === paneId ? { ...p, tabs: [...p.tabs, tab], activeTabId: tab.id } : p))
+    )
+  }
+  // 다른 pane의 탭을 포커스 pane으로 이동(복제 아님). 원본 pane이 비면 새 스크래치로 대체.
+  const movePaneTab = (fromId: string, toId: string, tabId: string): void =>
+    setPanes((prev) => {
+      const tab = prev.find((p) => p.id === fromId)?.tabs.find((t) => t.id === tabId)
+      if (!tab) return prev
+      return prev.map((p) => {
+        if (p.id === fromId) {
+          const rest = p.tabs.filter((t) => t.id !== tabId)
+          if (rest.length === 0) {
+            const fresh = makeScratch('', selectedHostId, 'Untitled query 1')
+            return { ...p, tabs: [fresh], activeTabId: fresh.id }
+          }
+          return { ...p, tabs: rest, activeTabId: rest[rest.length - 1].id }
+        }
+        if (p.id === toId) return { ...p, tabs: [...p.tabs, tab], activeTabId: tab.id }
+        return p
+      })
+    })
 
   const tabTitle = (t: EditorTab): string =>
     t.savedQueryId ? (library.queries.find((q) => q.id === t.savedQueryId)?.name ?? t.title) : t.title
@@ -95,11 +155,20 @@ export default function App(): JSX.Element {
     void api.getSettings().then((s) => setRowLimit(s.rowLimit))
   }, [refreshHosts, refreshHistory, refreshSaved])
 
-  // 실행 진행 stats 스트리밍 → 해당 requestId 탭에 반영
+  // 첫 pane을 포커스로 초기화(이후 #4에서 pane 내부 상호작용이 갱신)
   useEffect(() => {
-    return api.onQueryProgress((p) => {
-      setTabs((prev) =>
-        prev.map((t) => (t.requestId === p.requestId ? { ...t, progress: p.stats } : t))
+    setFocusedPaneId((cur) => cur || panes[0].id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // 실행 진행 stats 스트리밍 → 해당 requestId 탭에 반영(모든 pane 스캔)
+  useEffect(() => {
+    return api.onQueryProgress((pr) => {
+      setPanes((prev) =>
+        prev.map((pane) => ({
+          ...pane,
+          tabs: pane.tabs.map((t) => (t.requestId === pr.requestId ? { ...t, progress: pr.stats } : t))
+        }))
       )
     })
   }, [])
@@ -111,35 +180,64 @@ export default function App(): JSX.Element {
     return () => clearTimeout(t)
   }, [toast])
 
-  // ⌘1..9 로 해당 순번 탭 전환
+  // ⌘1..9 로 포커스 pane의 해당 순번 탭 전환
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && /^[1-9]$/.test(e.key)) {
         const idx = Number(e.key) - 1
-        if (idx < tabs.length) {
+        const fp = panes.find((p) => p.id === focusedPaneId) ?? panes[0]
+        if (idx < fp.tabs.length) {
           e.preventDefault()
-          setActiveTabId(tabs[idx].id)
+          setPanes((prev) =>
+            prev.map((p) => (p.id === fp.id ? { ...p, activeTabId: fp.tabs[idx].id } : p))
+          )
         }
       }
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [tabs])
+  }, [panes, focusedPaneId])
 
-  // host가 로드되면 hostId 없는 탭에 기본 연결 채움
+  // ⌘\ 로 세로 분할 토글
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if ((e.metaKey || e.ctrlKey) && e.key === '\\') {
+        e.preventDefault()
+        toggleSplit()
+      }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [panes, focusedPaneId, activeTab, selectedHostId])
+
+  // 분할 비율 영속화
+  useEffect(() => {
+    localStorage.setItem('wsSplitRatio', String(splitRatio))
+  }, [splitRatio])
+
+  // host가 로드되면 hostId 없는 탭에 기본 연결 채움(모든 pane)
   useEffect(() => {
     if (!selectedHostId) return
-    setTabs((prev) => prev.map((t) => (t.hostId ? t : { ...t, hostId: selectedHostId })))
+    setPanes((prev) =>
+      prev.map((p) => ({
+        ...p,
+        tabs: p.tabs.map((t) => (t.hostId ? t : { ...t, hostId: selectedHostId }))
+      }))
+    )
   }, [selectedHostId])
 
-  // library 변경 시: 삭제된 저장 쿼리에 바인딩된 탭은 스크래치로 변환(작업 보존)
+  // library 변경 시: 삭제된 저장 쿼리에 바인딩된 탭은 스크래치로 변환(작업 보존, 모든 pane)
   useEffect(() => {
-    setTabs((prev) =>
-      prev.map((t) =>
-        t.savedQueryId && !library.queries.some((q) => q.id === t.savedQueryId)
-          ? { ...t, savedQueryId: null, baseSql: '' }
-          : t
-      )
+    setPanes((prev) =>
+      prev.map((p) => ({
+        ...p,
+        tabs: p.tabs.map((t) =>
+          t.savedQueryId && !library.queries.some((q) => q.id === t.savedQueryId)
+            ? { ...t, savedQueryId: null, baseSql: '' }
+            : t
+        )
+      }))
     )
   }, [library])
 
@@ -181,42 +279,42 @@ export default function App(): JSX.Element {
     setSelectedHostId(id)
   }
 
-  // ----- 탭 조작 -----
-  const newScratchTab = (): void => {
-    const name = nextUntitled(tabs.map((t) => t.title))
-    const tab = makeScratch('', activeTab?.hostId ?? selectedHostId, name)
-    setTabs((prev) => [...prev, tab])
-    setActiveTabId(tab.id)
-  }
-
-  /** 저장 쿼리를 탭으로 연다(이미 열려 있으면 그 탭 포커스). 연 탭을 반환 */
+  // ----- 탭 조작(포커스 pane 대상) -----
+  /** 저장 쿼리를 포커스 pane에 연다. 이미 다른 pane에 열려 있으면 그 탭을 포커스 pane으로 이동(중복 금지). */
   const openSaved = (q: SavedQuery): EditorTab => {
-    const existing = tabs.find((t) => t.savedQueryId === q.id)
-    if (existing) {
-      setActiveTabId(existing.id)
-      return existing
+    for (const p of panes) {
+      const existing = p.tabs.find((t) => t.savedQueryId === q.id)
+      if (existing) {
+        if (p.id === focusedPane.id) setFocusedActive(existing.id)
+        else movePaneTab(p.id, focusedPane.id, existing.id)
+        return existing
+      }
     }
     const tab = makeBound(q, selectedHostId)
-    setTabs((prev) => [...prev, tab])
-    setActiveTabId(tab.id)
+    addTabToFocused(tab)
     return tab
   }
 
+  // 탭이 속한 pane에서 닫는다(비면 새 스크래치로 대체)
   const doCloseTab = (id: string): void => {
-    const idx = tabs.findIndex((t) => t.id === id)
-    const next = tabs.filter((t) => t.id !== id)
-    if (next.length === 0) {
-      const fresh = makeScratch('', selectedHostId, 'Untitled query 1')
-      setTabs([fresh])
-      setActiveTabId(fresh.id)
-      return
-    }
-    setTabs(next)
-    if (activeId === id) setActiveTabId(next[Math.min(idx, next.length - 1)].id)
+    setPanes((prev) =>
+      prev.map((p) => {
+        if (!p.tabs.some((t) => t.id === id)) return p
+        const idx = p.tabs.findIndex((t) => t.id === id)
+        const next = p.tabs.filter((t) => t.id !== id)
+        if (next.length === 0) {
+          const fresh = makeScratch('', selectedHostId, 'Untitled query 1')
+          return { ...p, tabs: [fresh], activeTabId: fresh.id }
+        }
+        const activeTabId =
+          p.activeTabId === id ? next[Math.min(idx, next.length - 1)].id : p.activeTabId
+        return { ...p, tabs: next, activeTabId }
+      })
+    )
   }
 
   const closeTab = (id: string): void => {
-    const t = tabs.find((x) => x.id === id)
+    const t = panes.flatMap((p) => p.tabs).find((x) => x.id === id)
     if (!t) return
     if (isDirty(t)) setClosingTabId(id)
     else doCloseTab(id)
@@ -249,42 +347,88 @@ export default function App(): JSX.Element {
     void executeQuery(tabId, sqlText, hostId, 0, true)
   }
 
-  const runQuery = (sqlToRun: string): void => {
-    const t = activeTab
+
+  // ----- 창(pane)별 액션 -----
+  const paneOf = (paneId: string): Pane | undefined => panes.find((p) => p.id === paneId)
+  const newScratchInPane = (paneId: string): void => {
+    const p = paneOf(paneId)
+    addTabToPane(paneId, makeScratch('', activeTabOf(p!)?.hostId ?? selectedHostId, nextUntitled(allTitles())))
+  }
+  const selectHostInPane = (paneId: string, id: string): void => {
+    setFocusedPaneId(paneId)
+    const t = paneOf(paneId) && activeTabOf(paneOf(paneId)!)
+    if (t) updateTab(t.id, { hostId: id })
+    setSelectedHostId(id)
+  }
+  const runInPane = (paneId: string, sqlToRun: string): void => {
+    const t = paneOf(paneId) && activeTabOf(paneOf(paneId)!)
     if (!t || t.running) return
-    if (!t.hostId) {
-      setToast('연결을 먼저 선택하세요.')
-      return
-    }
-    if (!sqlToRun.trim()) {
-      setToast('실행할 SQL이 없습니다.')
-      return
-    }
+    if (!t.hostId) return void setToast('연결을 먼저 선택하세요.')
+    if (!sqlToRun.trim()) return void setToast('실행할 SQL이 없습니다.')
     runFresh(t.id, sqlToRun, t.hostId)
   }
-  const cancelQuery = async (): Promise<void> => {
-    if (activeTab?.requestId) await api.cancelQuery(activeTab.requestId)
+  const cancelInPane = (paneId: string): void => {
+    const t = paneOf(paneId) && activeTabOf(paneOf(paneId)!)
+    if (t?.requestId) void api.cancelQuery(t.requestId)
   }
-  const goToPage = (page: number): void => {
-    const t = activeTab
+  const goToPageInPane = (paneId: string, page: number): void => {
+    const t = paneOf(paneId) && activeTabOf(paneOf(paneId)!)
     if (!t?.lastRun || page < 0) return
     void executeQuery(t.id, t.lastRun.sql, t.lastRun.hostId, page, false)
   }
-
-  // ----- 저장(💾) -----
-  const onSave = async (): Promise<void> => {
-    const t = activeTab
+  const saveInPane = (paneId: string): void => {
+    setFocusedPaneId(paneId)
+    const t = paneOf(paneId) && activeTabOf(paneOf(paneId)!)
     if (!t) return
     if (t.savedQueryId) {
-      await api.updateQuery({ id: t.savedQueryId, sql: t.sql })
-      updateTab(t.id, { baseSql: t.sql })
-      await refreshSaved()
+      void (async () => {
+        await api.updateQuery({ id: t.savedQueryId as string, sql: t.sql })
+        updateTab(t.id, { baseSql: t.sql })
+        await refreshSaved()
+      })()
     } else {
+      setSaveTargetTabId(t.id)
       setSaveDialogOpen(true)
     }
   }
+
+  // ----- 분할 토글 / 리사이즈 -----
+  const toggleSplit = (): void => {
+    if (panes.length === 1) {
+      const p2 = makePane([
+        makeScratch('', activeTab?.hostId ?? selectedHostId, nextUntitled(allTitles()))
+      ])
+      setPanes((prev) => [...prev, p2])
+      setFocusedPaneId(p2.id)
+    } else {
+      const keepId = panes[0].id
+      setPanes((prev) => {
+        const [a, b] = prev
+        return [{ ...a, tabs: [...a.tabs, ...b.tabs] }]
+      })
+      setFocusedPaneId(keepId)
+    }
+  }
+  const startPaneResize = (e: ReactMouseEvent): void => {
+    e.preventDefault()
+    const split = (e.currentTarget as HTMLElement).parentElement
+    if (!split) return
+    const rect = split.getBoundingClientRect()
+    const move = (ev: MouseEvent): void =>
+      setSplitRatio(Math.min(0.7, Math.max(0.3, (ev.clientX - rect.left) / rect.width)))
+    const end = (): void => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', end)
+      document.body.classList.remove('col-resizing')
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', end)
+    document.body.classList.add('col-resizing')
+  }
+
+  // ----- 저장(💾) -----
   const handleSaveQuery = async (res: SaveQueryResult): Promise<void> => {
-    const t = activeTab
+    const t = panes.flatMap((p) => p.tabs).find((x) => x.id === saveTargetTabId) ?? activeTab
     if (!t) return
     let folderId = res.folderId
     if (res.newFolderName) folderId = (await api.createFolder(res.newFolderName)).id
@@ -293,6 +437,7 @@ export default function App(): JSX.Element {
     await refreshSaved()
     updateTab(t.id, { savedQueryId: created.id, title: res.name, baseSql: t.sql })
     setSaveDialogOpen(false)
+    setSaveTargetTabId(null)
     setSection('saved')
     if (pendingCloseTabId === t.id) {
       doCloseTab(t.id)
@@ -301,7 +446,7 @@ export default function App(): JSX.Element {
   }
 
   // ----- 닫기 확인 모달 동작 -----
-  const closingTab = tabs.find((t) => t.id === closingTabId) ?? null
+  const closingTab = panes.flatMap((p) => p.tabs).find((t) => t.id === closingTabId) ?? null
   const confirmDiscard = (): void => {
     if (closingTabId) doCloseTab(closingTabId)
     setClosingTabId(null)
@@ -317,7 +462,7 @@ export default function App(): JSX.Element {
       doCloseTab(t.id)
     } else {
       // 스크래치 → 다른 이름으로 저장 후 닫기
-      setActiveTabId(t.id)
+      setFocusedActive(t.id)
       setPendingCloseTabId(t.id)
       setSaveDialogOpen(true)
     }
@@ -326,9 +471,8 @@ export default function App(): JSX.Element {
   // ----- history actions (항상 새 스크래치 탭) -----
   const openHistoryTab = (entry: HistoryEntry): EditorTab => {
     const hostId = hosts.some((h) => h.id === entry.hostId) ? entry.hostId : selectedHostId
-    const tab = makeScratch(entry.sql, hostId, nextUntitled(tabs.map((t) => t.title)))
-    setTabs((prev) => [...prev, tab])
-    setActiveTabId(tab.id)
+    const tab = makeScratch(entry.sql, hostId, nextUntitled(allTitles()))
+    addTabToFocused(tab)
     return tab
   }
   const loadHistory = (entry: HistoryEntry): void => {
@@ -390,7 +534,7 @@ export default function App(): JSX.Element {
     })
   // 폴더에 빈 SQL 새 쿼리 생성 후 그 탭 열기
   const createQueryInFolder = async (folder: QueryFolder): Promise<void> => {
-    const taken = [...tabs.map((t) => t.title), ...library.queries.map((q) => q.name)]
+    const taken = [...allTitles(), ...library.queries.map((q) => q.name)]
     const created = await api.createQuery({ folderId: folder.id, name: nextUntitled(taken), sql: '' })
     await refreshSaved()
     setSection('saved')
@@ -432,7 +576,6 @@ export default function App(): JSX.Element {
 
   const activeHostId = activeTab?.hostId ?? null
   const selectedHost = hosts.find((h) => h.id === activeHostId) ?? null
-  const tabViews = tabs.map((t) => ({ id: t.id, title: tabTitle(t), dirty: isDirty(t) }))
 
   // 사이드바 크기/접힘 상태 영속화(localStorage)
   useEffect(() => {
@@ -518,6 +661,57 @@ export default function App(): JSX.Element {
     )
   }
 
+  // 한 pane(에디터+결과)을 렌더. 분할 시 창별 독립 상태/액션.
+  const renderPane = (pane: Pane): JSX.Element => {
+    const pa = activeTabOf(pane)
+    const views = pane.tabs.map((t) => ({ id: t.id, title: tabTitle(t), dirty: isDirty(t) }))
+    const split = panes.length > 1
+    return (
+      <div
+        key={pane.id}
+        className={'ws-pane' + (split && pane.id === focusedPane.id ? ' focused' : '')}
+        style={split ? { flex: pane.id === panes[0].id ? splitRatio : 1 - splitRatio } : undefined}
+        onMouseDownCapture={() => setFocusedPaneId(pane.id)}
+        onFocusCapture={() => setFocusedPaneId(pane.id)}
+      >
+        <SqlEditor
+          tabs={views}
+          activeTabId={pa?.id ?? ''}
+          onSelectTab={(id) => {
+            setFocusedPaneId(pane.id)
+            updatePane(pane.id, { activeTabId: id })
+          }}
+          onCloseTab={closeTab}
+          onNewTab={() => newScratchInPane(pane.id)}
+          sql={pa?.sql ?? ''}
+          onChange={(v) => pa && updateTab(pa.id, { sql: v })}
+          onRun={(sql) => runInPane(pane.id, sql)}
+          onCancel={() => cancelInPane(pane.id)}
+          onSave={() => saveInPane(pane.id)}
+          running={pa?.running ?? false}
+          isScratch={pa ? pa.savedQueryId === null : true}
+          hosts={hosts}
+          hostId={pa?.hostId ?? null}
+          onSelectHost={(id) => selectHostInPane(pane.id, id)}
+          rowLimit={rowLimit}
+          onRowLimitChange={changeRowLimit}
+          split={split}
+          onToggleSplit={toggleSplit}
+        />
+        <ResultsPane
+          result={pa?.result ?? null}
+          error={pa?.error ?? null}
+          errorInfo={pa?.errorInfo ?? null}
+          running={pa?.running ?? false}
+          progress={pa?.progress ?? null}
+          onCancel={() => cancelInPane(pane.id)}
+          onPrevPage={() => pa?.result && goToPageInPane(pane.id, pa.result.page - 1)}
+          onNextPage={() => pa?.result && goToPageInPane(pane.id, pa.result.page + 1)}
+        />
+      </div>
+    )
+  }
+
   return (
     <div className="app">
       <div className="app-body">
@@ -569,35 +763,19 @@ export default function App(): JSX.Element {
         )}
 
         <div className="workspace">
-          <SqlEditor
-            tabs={tabViews}
-            activeTabId={activeId}
-            onSelectTab={setActiveTabId}
-            onCloseTab={closeTab}
-            onNewTab={newScratchTab}
-            sql={activeTab?.sql ?? ''}
-            onChange={(v) => activeId && updateTab(activeId, { sql: v })}
-            onRun={runQuery}
-            onCancel={cancelQuery}
-            onSave={onSave}
-            running={activeTab?.running ?? false}
-            isScratch={activeTab ? activeTab.savedQueryId === null : true}
-            hosts={hosts}
-            hostId={activeHostId}
-            onSelectHost={selectHost}
-            rowLimit={rowLimit}
-            onRowLimitChange={changeRowLimit}
-          />
-          <ResultsPane
-            result={activeTab?.result ?? null}
-            error={activeTab?.error ?? null}
-            errorInfo={activeTab?.errorInfo ?? null}
-            running={activeTab?.running ?? false}
-            progress={activeTab?.progress ?? null}
-            onCancel={cancelQuery}
-            onPrevPage={() => activeTab?.result && goToPage(activeTab.result.page - 1)}
-            onNextPage={() => activeTab?.result && goToPage(activeTab.result.page + 1)}
-          />
+          <div className="ws-split">
+            {renderPane(panes[0])}
+            {panes.length > 1 && (
+              <div
+                className="ws-splitter"
+                role="separator"
+                aria-orientation="vertical"
+                title="드래그로 창 크기 조절"
+                onMouseDown={startPaneResize}
+              />
+            )}
+            {panes.length > 1 && renderPane(panes[1])}
+          </div>
         </div>
       </div>
 

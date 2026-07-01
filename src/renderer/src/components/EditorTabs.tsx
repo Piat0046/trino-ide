@@ -1,4 +1,4 @@
-import { IconPlus, IconX } from './icons'
+import { IconPlus, IconSplit, IconX } from './icons'
 
 export interface TabView {
   id: string
@@ -12,9 +12,20 @@ interface Props {
   onSelect: (id: string) => void
   onClose: (id: string) => void
   onNew: () => void
+  /** 세로 분할 상태 + 토글(우상단) */
+  split?: boolean
+  onToggleSplit?: () => void
 }
 
-export function EditorTabs({ tabs, activeTabId, onSelect, onClose, onNew }: Props): JSX.Element {
+export function EditorTabs({
+  tabs,
+  activeTabId,
+  onSelect,
+  onClose,
+  onNew,
+  split,
+  onToggleSplit
+}: Props): JSX.Element {
   return (
     <div className="tabstrip">
       {tabs.map((t) => (
@@ -46,6 +57,17 @@ export function EditorTabs({ tabs, activeTabId, onSelect, onClose, onNew }: Prop
       <button className="tab-new" title="새 탭" onClick={onNew}>
         <IconPlus size={15} />
       </button>
+      <span className="tab-strip-spacer" />
+      {onToggleSplit && (
+        <button
+          className={'tab-split' + (split ? ' active' : '')}
+          title={split ? '한 화면으로 (⌘\\)' : '세로로 나누기 (⌘\\)'}
+          aria-pressed={split}
+          onClick={onToggleSplit}
+        >
+          <IconSplit size={15} />
+        </button>
+      )}
     </div>
   )
 }

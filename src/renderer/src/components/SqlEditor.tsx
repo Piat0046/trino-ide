@@ -34,6 +34,9 @@ interface Props {
   // LIMIT (전역)
   rowLimit: number | null
   onRowLimitChange: (limit: number | null) => void
+  // 세로 분할 토글(탭 스트립 우상단)
+  split?: boolean
+  onToggleSplit?: () => void
 }
 
 const NUMERIC_PRESETS = ['100', '300', '500', '1000', '5000', '10000']
@@ -56,7 +59,9 @@ export function SqlEditor({
   hostId,
   onSelectHost,
   rowLimit,
-  onRowLimitChange
+  onRowLimitChange,
+  split,
+  onToggleSplit
 }: Props): JSX.Element {
   const cmRef = useRef<ReactCodeMirrorRef>(null)
   const unlimited = rowLimit === null
@@ -128,6 +133,8 @@ export function SqlEditor({
         onSelect={onSelectTab}
         onClose={onCloseTab}
         onNew={onNewTab}
+        split={split}
+        onToggleSplit={onToggleSplit}
       />
 
       <div className="toolbar">
