@@ -19,7 +19,9 @@ const api: TrinoIdeApi = {
   updateQuery: (input) => ipcRenderer.invoke('saved:updateQuery', input),
   deleteQuery: (id) => ipcRenderer.invoke('saved:deleteQuery', id),
   getSettings: () => ipcRenderer.invoke('settings:get'),
-  updateSettings: (patch) => ipcRenderer.invoke('settings:update', patch)
+  updateSettings: (patch) => ipcRenderer.invoke('settings:update', patch),
+  copyToClipboard: (text) => ipcRenderer.invoke('clipboard:write', text),
+  saveTextFile: (input) => ipcRenderer.invoke('file:saveText', input)
 }
 
 if (process.contextIsolated) {

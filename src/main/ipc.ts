@@ -1,9 +1,12 @@
-import { ipcMain } from 'electron'
+import { clipboard, dialog, ipcMain } from 'electron'
+import { writeFile } from 'node:fs/promises'
 import type {
   HostInput,
   IpcResult,
   QueryResultPayload,
-  RunQueryRequest
+  RunQueryRequest,
+  SaveFileResult,
+  SaveTextInput
 } from '@shared/types'
 import type { AppSettings, CreateQueryInput, UpdateQueryInput } from '@shared/types'
 import { decryptPassword, deleteHost, getStoredHost, listHosts, saveHost } from './store/hosts'
@@ -181,4 +184,16 @@ export function registerIpcHandlers(): void {
   // ----- settings -----
   ipcMain.handle('settings:get', () => getSettings())
   ipcMain.handle('settings:update', (_e, patch: Partial<AppSettings>) => updateSettings(patch))
+
+  // ----- clipboard / export -----
+  ipcMain.handle('clipboard:write', (_e, text: string) => clipboard.writeText(text))
+  ipcMain.handle(
+    'file:saveText',
+    async (_e, input: SaveTextInput): Promise<SaveFileResult> => {
+      const { canceled, filePath } = await dialog.showSaveDialog({ defaultPath: input.defaultName })
+      if (canceled || !filePath) return { saved: false }
+      await writeFile(filePath, input.content, 'utf-8')
+      return { saved: true, path: filePath }
+    }
+  )
 }

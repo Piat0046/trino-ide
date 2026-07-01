@@ -89,6 +89,31 @@ export const IconColumns = ({ size }: IconProps): JSX.Element =>
     size
   )
 
+export const IconCopy = ({ size }: IconProps): JSX.Element =>
+  svg(
+    <>
+      <rect x="9" y="9" width="11" height="11" rx="2" />
+      <path d="M5 15V5a2 2 0 012-2h8" />
+    </>,
+    size
+  )
+
+export const IconDownload = ({ size }: IconProps): JSX.Element =>
+  svg(
+    <>
+      <path d="M12 4v11" />
+      <path d="M7 11l5 5 5-5" />
+      <path d="M5 20h14" />
+    </>,
+    size
+  )
+
+export const IconArrowUp = ({ size }: IconProps): JSX.Element =>
+  svg(<path d="M12 19V5M6 11l6-6 6 6" />, size)
+
+export const IconArrowDown = ({ size }: IconProps): JSX.Element =>
+  svg(<path d="M12 5v14M6 13l6 6 6-6" />, size)
+
 export const IconEyeOff = ({ size }: IconProps): JSX.Element =>
   svg(
     <>

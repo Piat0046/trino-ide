@@ -128,6 +128,18 @@ export interface UpdateQueryInput {
   folderId?: string
 }
 
+/** 텍스트 파일 저장 요청(내보내기) */
+export interface SaveTextInput {
+  /** 저장 다이얼로그 기본 파일명(확장자 포함) */
+  defaultName: string
+  content: string
+}
+/** 파일 저장 결과. 사용자가 취소하면 saved:false */
+export interface SaveFileResult {
+  saved: boolean
+  path?: string
+}
+
 /** IPC 경계에서 throw 대신 명시적으로 성공/실패를 표현 */
 export type IpcResult<T> = { ok: true; value: T } | { ok: false; error: string }
 
@@ -151,4 +163,8 @@ export interface TrinoIdeApi {
   deleteQuery(id: string): Promise<void>
   getSettings(): Promise<AppSettings>
   updateSettings(patch: Partial<AppSettings>): Promise<AppSettings>
+  /** OS 클립보드에 텍스트 복사 */
+  copyToClipboard(text: string): Promise<void>
+  /** 저장 다이얼로그를 열어 텍스트를 파일로 저장(내보내기) */
+  saveTextFile(input: SaveTextInput): Promise<SaveFileResult>
 }

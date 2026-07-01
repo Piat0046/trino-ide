@@ -84,6 +84,7 @@ renderer (React)  ──IPC──▶  main process  ──HTTP──▶  Trino
     - **Trino 자동완성**(`lib/trinoDialect.ts` + `lib/trinoWords.ts`): `sql()` 대신 `trino`(`SQLDialect.define` 기반 `LanguageSupport`)를 주입. 실제 서버 메타데이터가 아니라 **정적 Trino 키워드/타입/함수 목록**(`trinoWords.ts` — `sql-formatter`의 Trino 데이터에서 생성, **소문자 필수** = 토크나이저 하이라이팅 조건). 커스텀 완성 소스: 키워드/타입은 대문자·함수는 소문자 라벨, 상위 빈용 함수 `boost`, 함수는 **2글자↑**부터, `.`뒤·문자열·주석에서 억제, **자동 괄호 없음**(`current_date` 등 무괄호 함수 때문). 팝업 스타일·타입색 아이콘·틸 매칭 강조는 `cmTheme.ts`. 목록 재생성은 `scratchpad/gen-trino-words.mjs` 참고(출처 커밋 고정). **테이블/컬럼은 완성되지 않음**(범위 밖).
   - `EditorTabs` (멀티 탭 스트립 + 새 탭 `+`), `CloseTabDialog` (dirty 탭 닫기 3버튼 확인).
   - `ResultsPane` (서브탭 **Results/Messages** + **타입 인지 그리드**[숫자 우정렬·타입 라벨·NULL·헤더/행번호 sticky] + **계기판 푸터**[◀ Page n ▶ · rows · time · scan · bytes]). 그리드는 **`@tanstack/react-virtual` 가상 스크롤**(div 기반, 열 너비는 상위 300행 샘플로 미리 고정, `scrollMargin=HEAD_H`로 sticky 헤더 보정) — 받은 행 전체를 스크롤로 본다(DOM에는 보이는 ~30행만). `orderByWarning` 배너.
+    - **결과 활용**(배치1): **정렬**(헤더 클릭 = 현재 페이지 클라이언트 정렬 asc→desc→해제, 타입 인지·NULL은 끝, `displayRows` useMemo), **복사**(셀 클릭 선택+⌘C, 우클릭 값/행/열 복사, 툴바 "복사"=전체 TSV → `api.copyToClipboard`), **내보내기**(툴바 "내보내기" → CSV/JSON, `api.saveTextFile`가 main `dialog.showSaveDialog`+`writeFile`), **셀 상세 패널**(선택 셀 값 pretty-print — 객체/JSON 문자열은 들여쓰기). 복사/저장은 상단 `.copy-flash` 토스트. 정렬은 페이지 이동/새 쿼리 시 초기화(시그니처 변경 시 `sort`/`sel` 리셋). 헤더 드래그(순서)와 클릭(정렬)이 공존.
     - **컬럼 조작**: 헤더 우측 가장자리 드래그로 **너비 조정**, 헤더 본문 드래그로 **순서 변경**, 우상단 **"열" 팝오버**(체크박스+초기화)로 **숨김/표시**, 헤더 **우클릭 컨텍스트 메뉴**(`.ctx-menu`, 마우스 위치 `fixed`)의 **"열 숨김"**으로 해당 열 즉시 숨김(바깥클릭·Esc·스크롤 시 닫힘). 상태는 `colState={sig, cols:ColConfig[]}`(각 `{origIndex,width,visible}`, 배열 순서=표시 순서)로 보관. **컬럼 시그니처**(이름+타입 목록)가 같으면 유지, 바뀌면 기본값 재구성 — 그래서 **같은 쿼리의 페이지 이동(동일 시그니처) 중에는 너비/순서/숨김이 유지**되고, 다른 모양의 새 쿼리면 초기화된다. header/body 모두 `visibleCols`를 `origIndex`로 렌더해 정렬 유지.
     - **무제한 수신은 ipc에서 50,000행 안전 상한**(`UNLIMITED_CAP`)으로 보호 → 초과 시 `truncated`로 "안전 상한 도달, LIMIT 사용" 안내. 더 큰 데이터는 숫자 LIMIT 페이지네이션으로 접근.
   - `StatusBar` (연결 라이브 점·이름·URL / rows·elapsed·page). 실행 중 점은 앰버 pulse.
@@ -118,6 +119,8 @@ renderer (React)  ──IPC──▶  main process  ──HTTP──▶  Trino
 | `saved:deleteQuery` | `id` → void |
 | `settings:get` | → `AppSettings{rowLimit}` |
 | `settings:update` | `Partial<AppSettings>` → `AppSettings` |
+| `clipboard:write` | `text` → void (OS 클립보드 복사) |
+| `file:saveText` | `SaveTextInput{defaultName,content}` → `SaveFileResult{saved,path?}` (저장 다이얼로그) |
 
 새 기능을 추가할 때는 보통 **4곳을 같이 고친다**: `shared/types.ts`(타입/`TrinoIdeApi`) → `main/ipc.ts`(핸들러) → `preload/index.ts`(브리지) → renderer 호출부.
 
