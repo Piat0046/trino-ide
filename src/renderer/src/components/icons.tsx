@@ -130,6 +130,19 @@ export const IconChevronLeft = ({ size }: IconProps): JSX.Element =>
 export const IconChevronRight = ({ size }: IconProps): JSX.Element =>
   svg(<path d="M9 6l6 6-6 6" />, size)
 
+export const IconChevronDown = ({ size }: IconProps): JSX.Element =>
+  svg(<path d="M6 9l6 6 6-6" />, size)
+
+export const IconTrash = ({ size }: IconProps): JSX.Element =>
+  svg(
+    <>
+      <path d="M4 7h16" />
+      <path d="M9 7V5h6v2" />
+      <path d="M7 7l1 13h8l1-13" />
+    </>,
+    size
+  )
+
 export const IconX = ({ size }: IconProps): JSX.Element =>
   svg(
     <>

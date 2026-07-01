@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { QueryFolder, SavedLibrary, SavedQuery } from '@shared/types'
+import { IconChevronDown, IconChevronRight, IconPlus } from './icons'
 
 interface Props {
   library: SavedLibrary
@@ -53,18 +54,21 @@ export function SavedPanel({
           return (
             <li key={folder.id} className="folder">
               <div className="folder-row" onClick={() => toggle(folder.id)}>
-                <span className="caret">{isCollapsed ? '▸' : '▾'}</span>
+                <span className="caret">
+                  {isCollapsed ? <IconChevronRight size={13} /> : <IconChevronDown size={13} />}
+                </span>
                 <span className="folder-name">{folder.name}</span>
                 <span className="folder-count">{queries.length}</span>
                 <div className="row-actions">
                   <button
+                    className="mini"
                     title="이 폴더에 새 쿼리 만들기 (빈 SQL)"
                     onClick={(e) => {
                       e.stopPropagation()
                       onAddQuery(folder)
                     }}
                   >
-                    ＋쿼리
+                    <IconPlus size={12} />쿼리
                   </button>
                   <button
                     onClick={(e) => {

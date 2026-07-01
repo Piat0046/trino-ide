@@ -40,7 +40,7 @@ export function HostList({ hosts, selectedHostId, onSelect, onEdit, onDelete }: 
                 <button
                   onClick={(e) => {
                     e.stopPropagation()
-                    if (confirm(`'${h.name}' 연결을 삭제할까요?`)) onDelete(h)
+                    onDelete(h)
                   }}
                 >
                   삭제

@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react'
+import { useEscClose } from '../lib/useEscClose'
 
 interface Props {
   title: string
@@ -23,6 +24,7 @@ export function PromptDialog({
 }: Props): JSX.Element {
   const [value, setValue] = useState(initialValue)
   const valid = value.trim().length > 0
+  useEscClose(onClose)
 
   const handleSubmit = (e: FormEvent): void => {
     e.preventDefault()
@@ -32,7 +34,14 @@ export function PromptDialog({
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={handleSubmit}>
+      <form
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={handleSubmit}
+      >
         <h2>{title}</h2>
         <label>
           이름

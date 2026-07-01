@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import type { QueryFolder } from '@shared/types'
+import { useEscClose } from '../lib/useEscClose'
 
 export interface SaveQueryResult {
   name: string
@@ -24,6 +25,7 @@ export function SaveQueryDialog({ folders, sqlPreview, onClose, onSave }: Props)
   const [folderId, setFolderId] = useState<string>(folders[0]?.id ?? NEW_FOLDER)
   const [newFolderName, setNewFolderName] = useState('')
   const [saving, setSaving] = useState(false)
+  useEscClose(onClose)
 
   const creatingFolder = folderId === NEW_FOLDER || folders.length === 0
   const valid = name.trim().length > 0 && (!creatingFolder || newFolderName.trim().length > 0)
@@ -45,7 +47,14 @@ export function SaveQueryDialog({ folders, sqlPreview, onClose, onSave }: Props)
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={handleSubmit}>
+      <form
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="쿼리 저장"
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={handleSubmit}
+      >
         <h2>쿼리 저장</h2>
 
         <label>

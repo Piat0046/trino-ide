@@ -89,7 +89,8 @@ renderer (React)  ──IPC──▶  main process  ──HTTP──▶  Trino
     - **컬럼 조작**: 헤더 우측 가장자리 드래그로 **너비 조정**, 헤더 본문 드래그로 **순서 변경**, 우상단 **"열" 팝오버**(체크박스+초기화)로 **숨김/표시**, 헤더 **우클릭 컨텍스트 메뉴**(`.ctx-menu`, 마우스 위치 `fixed`)의 **"열 숨김"**으로 해당 열 즉시 숨김(바깥클릭·Esc·스크롤 시 닫힘). 상태는 `colState={sig, cols:ColConfig[]}`(각 `{origIndex,width,visible}`, 배열 순서=표시 순서)로 보관. **컬럼 시그니처**(이름+타입 목록)가 같으면 유지, 바뀌면 기본값 재구성 — 그래서 **같은 쿼리의 페이지 이동(동일 시그니처) 중에는 너비/순서/숨김이 유지**되고, 다른 모양의 새 쿼리면 초기화된다. header/body 모두 `visibleCols`를 `origIndex`로 렌더해 정렬 유지.
     - **무제한 수신은 ipc에서 50,000행 안전 상한**(`UNLIMITED_CAP`)으로 보호 → 초과 시 `truncated`로 "안전 상한 도달, LIMIT 사용" 안내. 더 큰 데이터는 숫자 LIMIT 페이지네이션으로 접근.
   - `StatusBar` (연결 라이브 점·이름·URL / rows·elapsed·page). 실행 중 점은 앰버 pulse.
-  - `SaveQueryDialog` / `HostDialog` / `PromptDialog` (모달). **주의: Electron은 `window.prompt` 미지원** → 이름 입력은 `PromptDialog`로. `confirm`/`alert`는 동작.
+  - `SaveQueryDialog` / `HostDialog` / `PromptDialog` / `ConfirmDialog` (모달). **주의: Electron은 `window.prompt` 미지원** → 이름 입력은 `PromptDialog`로. **네이티브 `window.confirm`/`alert`도 안 씀**(다크 테마와 이질적) → 삭제 확인은 `ConfirmDialog`(App의 `askConfirm(cfg)`), 경량 알림은 App **토스트**(`.app-toast`, `setToast`)로. 모든 모달은 `useEscClose` 훅 + `role="dialog"`/`aria-modal`.
+    - **완성도**(배치3): 커스텀 확인/토스트, 모달 Esc·autoFocus·ARIA, StatusBar 상태점 정직화(실행중=앰버·오류=빨강·성공=초록·선택만=중립·미선택=회색)+`catalog.schema` 뱃지+"연결 선택 안 됨", `⌘1..9` 탭 전환(App 전역 keydown), 아이콘 일관화(⌫→`IconTrash`·▸▾→chevron·＋쿼리→`IconPlus`), 미저장 `●`는 탭 hover 중에도 유지, "제한하지 않음" 문구를 5만 행 상한과 정합.
   - `icons.tsx` (16px 스트로크 SVG 세트).
   - 저장 쿼리는 host와 무관 → 더블클릭 실행은 **현재 선택된 host**로.
 

@@ -165,7 +165,8 @@ export function SqlEditor({
               <option key={p} value={p} />
             ))}
           </datalist>
-          <label className="limit-unlimited" title="상한 없이 전체 결과를 받습니다">
+          <label className="limit-unlimited" title="LIMIT 없이 받되 안전상 최대 5만 행까지 표시">
+
             <input
               type="checkbox"
               checked={unlimited}

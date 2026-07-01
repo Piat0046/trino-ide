@@ -18,7 +18,8 @@ import { StatusBar } from './components/StatusBar'
 import { SaveQueryDialog, type SaveQueryResult } from './components/SaveQueryDialog'
 import { PromptDialog } from './components/PromptDialog'
 import { CloseTabDialog } from './components/CloseTabDialog'
-import { IconChevronLeft, IconPlus } from './components/icons'
+import { ConfirmDialog, type ConfirmConfig } from './components/ConfirmDialog'
+import { IconChevronLeft, IconPlus, IconTrash } from './components/icons'
 import { type EditorTab, isDirty, makeBound, makeScratch, nextUntitled } from './lib/tabs'
 
 const api = window.api
@@ -55,6 +56,9 @@ export default function App(): JSX.Element {
   const [library, setLibrary] = useState<SavedLibrary>(EMPTY_LIBRARY)
   const [saveDialogOpen, setSaveDialogOpen] = useState(false)
   const [promptState, setPromptState] = useState<PromptConfig | null>(null)
+  const [confirmState, setConfirmState] = useState<ConfirmConfig | null>(null)
+  const [toast, setToast] = useState<string | null>(null)
+  const askConfirm = (cfg: ConfirmConfig): void => setConfirmState(cfg)
   const [rowLimit, setRowLimit] = useState<number | null>(300)
 
   // ----- 멀티 탭 -----
@@ -100,6 +104,28 @@ export default function App(): JSX.Element {
     })
   }, [])
 
+  // 토스트 자동 소멸
+  useEffect(() => {
+    if (!toast) return
+    const t = setTimeout(() => setToast(null), 2200)
+    return () => clearTimeout(t)
+  }, [toast])
+
+  // ⌘1..9 로 해당 순번 탭 전환
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && /^[1-9]$/.test(e.key)) {
+        const idx = Number(e.key) - 1
+        if (idx < tabs.length) {
+          e.preventDefault()
+          setActiveTabId(tabs[idx].id)
+        }
+      }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [tabs])
+
   // host가 로드되면 hostId 없는 탭에 기본 연결 채움
   useEffect(() => {
     if (!selectedHostId) return
@@ -137,11 +163,18 @@ export default function App(): JSX.Element {
     await refreshHosts()
     selectHost(saved.id)
   }
-  const handleDeleteHost = async (h: HostConfig): Promise<void> => {
-    await api.deleteHost(h.id)
-    setSelectedHostId((cur) => (cur === h.id ? null : cur))
-    await refreshHosts()
-  }
+  const handleDeleteHost = (h: HostConfig): void =>
+    askConfirm({
+      title: '연결 삭제',
+      message: `'${h.name}' 연결을 삭제합니다.`,
+      confirmLabel: '삭제',
+      danger: true,
+      onConfirm: async () => {
+        await api.deleteHost(h.id)
+        setSelectedHostId((cur) => (cur === h.id ? null : cur))
+        await refreshHosts()
+      }
+    })
 
   const selectHost = (id: string): void => {
     if (activeId) updateTab(activeId, { hostId: id })
@@ -218,7 +251,15 @@ export default function App(): JSX.Element {
 
   const runQuery = (sqlToRun: string): void => {
     const t = activeTab
-    if (!t || t.running || !t.hostId || !sqlToRun.trim()) return
+    if (!t || t.running) return
+    if (!t.hostId) {
+      setToast('연결을 먼저 선택하세요.')
+      return
+    }
+    if (!sqlToRun.trim()) {
+      setToast('실행할 SQL이 없습니다.')
+      return
+    }
     runFresh(t.id, sqlToRun, t.hostId)
   }
   const cancelQuery = async (): Promise<void> => {
@@ -301,11 +342,18 @@ export default function App(): JSX.Element {
     await api.deleteHistory(id)
     await refreshHistory()
   }
-  const clearHistory = async (): Promise<void> => {
-    if (history.length && window.confirm('실행 기록을 모두 지울까요?')) {
-      await api.clearHistory()
-      await refreshHistory()
-    }
+  const clearHistory = (): void => {
+    if (!history.length) return
+    askConfirm({
+      title: '실행 기록 삭제',
+      message: '모든 실행 기록을 지웁니다. 되돌릴 수 없습니다.',
+      confirmLabel: '전체 삭제',
+      danger: true,
+      onConfirm: async () => {
+        await api.clearHistory()
+        await refreshHistory()
+      }
+    })
   }
 
   // ----- saved query actions -----
@@ -329,11 +377,17 @@ export default function App(): JSX.Element {
         await refreshSaved()
       }
     })
-  const deleteFolder = async (folder: QueryFolder): Promise<void> => {
-    if (!window.confirm(`'${folder.name}' 폴더와 그 안의 쿼리를 모두 삭제할까요?`)) return
-    await api.deleteFolder(folder.id)
-    await refreshSaved()
-  }
+  const deleteFolder = (folder: QueryFolder): void =>
+    askConfirm({
+      title: '폴더 삭제',
+      message: `'${folder.name}' 폴더와 그 안의 쿼리를 모두 삭제합니다.`,
+      confirmLabel: '삭제',
+      danger: true,
+      onConfirm: async () => {
+        await api.deleteFolder(folder.id)
+        await refreshSaved()
+      }
+    })
   // 폴더에 빈 SQL 새 쿼리 생성 후 그 탭 열기
   const createQueryInFolder = async (folder: QueryFolder): Promise<void> => {
     const taken = [...tabs.map((t) => t.title), ...library.queries.map((q) => q.name)]
@@ -349,7 +403,7 @@ export default function App(): JSX.Element {
     const tab = openSaved(q)
     const hostId = tab.hostId ?? selectedHostId
     if (!hostId) {
-      window.alert('먼저 연결을 선택하세요.')
+      setToast('먼저 연결을 선택하세요.')
       return
     }
     runFresh(tab.id, tab.sql, hostId)
@@ -364,11 +418,17 @@ export default function App(): JSX.Element {
         await refreshSaved()
       }
     })
-  const deleteSaved = async (q: SavedQuery): Promise<void> => {
-    if (!window.confirm(`'${q.name}' 쿼리를 삭제할까요?`)) return
-    await api.deleteQuery(q.id)
-    await refreshSaved()
-  }
+  const deleteSaved = (q: SavedQuery): void =>
+    askConfirm({
+      title: '쿼리 삭제',
+      message: `'${q.name}' 쿼리를 삭제합니다.`,
+      confirmLabel: '삭제',
+      danger: true,
+      onConfirm: async () => {
+        await api.deleteQuery(q.id)
+        await refreshSaved()
+      }
+    })
 
   const activeHostId = activeTab?.hostId ?? null
   const selectedHost = hosts.find((h) => h.id === activeHostId) ?? null
@@ -450,7 +510,7 @@ export default function App(): JSX.Element {
         <span className="explorer-title">History</span>
         <div className="explorer-actions">
           <button className="icon-btn" title="전체 삭제" disabled={history.length === 0} onClick={clearHistory}>
-            ⌫
+            <IconTrash size={15} />
           </button>
           {collapseBtn}
         </div>
@@ -587,6 +647,17 @@ export default function App(): JSX.Element {
           onCancel={() => setClosingTabId(null)}
         />
       )}
+      {confirmState && (
+        <ConfirmDialog
+          {...confirmState}
+          onCancel={() => setConfirmState(null)}
+          onConfirm={() => {
+            confirmState.onConfirm()
+            setConfirmState(null)
+          }}
+        />
+      )}
+      {toast && <div className="app-toast">{toast}</div>}
     </div>
   )
 }

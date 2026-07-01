@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import type { HostConfig, HostInput, IpcResult, QueryResultPayload } from '@shared/types'
+import { useEscClose } from '../lib/useEscClose'
 
 interface Props {
   host: HostConfig | null
@@ -21,6 +22,7 @@ export function HostDialog({ host, onClose, onSave, onTest }: Props): JSX.Elemen
   const [testState, setTestState] = useState<TestState>('idle')
   const [testMsg, setTestMsg] = useState('')
   const [saving, setSaving] = useState(false)
+  useEscClose(onClose)
 
   const buildInput = (): HostInput => ({
     id: host?.id,
@@ -61,12 +63,25 @@ export function HostDialog({ host, onClose, onSave, onTest }: Props): JSX.Elemen
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={handleSubmit}>
+      <form
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={host ? '연결 편집' : '연결 추가'}
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={handleSubmit}
+      >
         <h2>{host ? 'Host 편집' : 'Host 추가'}</h2>
 
         <label>
           이름
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="prod-trino" required />
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="prod-trino"
+            autoFocus
+            required
+          />
         </label>
         <label>
           서버 URL
