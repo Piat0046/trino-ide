@@ -40,7 +40,7 @@ interface PromptConfig {
 export default function App(): JSX.Element {
   const [hosts, setHosts] = useState<HostConfig[]>([])
   const [selectedHostId, setSelectedHostId] = useState<string | null>(null)
-  const [section, setSection] = useState<ExplorerSection>('connections')
+  const [section, setSection] = useState<ExplorerSection>('saved')
   const [explorerWidth, setExplorerWidth] = useState<number>(() => {
     const v = Number(localStorage.getItem('explorerWidth'))
     return Number.isFinite(v) && v >= MIN_EXPLORER && v <= MAX_EXPLORER ? v : DEFAULT_EXPLORER
@@ -59,7 +59,7 @@ export default function App(): JSX.Element {
 
   // ----- 멀티 탭 -----
   const [tabs, setTabs] = useState<EditorTab[]>(() => [
-    makeScratch('SELECT 1', null, 'Untitled query 1')
+    makeScratch('', null, 'Untitled query 1')
   ])
   const [activeTabId, setActiveTabId] = useState<string | null>(null)
   const [closingTabId, setClosingTabId] = useState<string | null>(null)
