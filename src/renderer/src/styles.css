@@ -751,51 +751,48 @@ select {
   border-bottom: 1px solid var(--border);
 }
 
-/* 데이터 그리드 */
+/* 데이터 그리드 (가상 스크롤, div 기반) */
 .grid-wrap {
   flex: 1;
   overflow: auto;
   min-height: 0;
+  position: relative;
 }
-.grid {
-  border-collapse: separate;
-  border-spacing: 0;
+.grid2 {
+  position: relative;
   font-family: var(--mono);
   font-size: 12px;
-  width: max-content;
-  min-width: 100%;
 }
-.grid th,
-.grid td {
-  border-right: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
-  padding: 5px 12px;
-  text-align: left;
-  max-width: 460px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.grid thead th {
+.grid2-head {
   position: sticky;
   top: 0;
-  z-index: 2;
+  z-index: 3;
+  display: grid;
   background: var(--bg-1);
-  vertical-align: bottom;
-  border-bottom: 1px solid var(--border-strong);
 }
-.grid .col-name {
+.g-hcell {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  padding: 4px 12px;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border-strong);
+  overflow: hidden;
+}
+.g-hcell .col-name {
   font-family: var(--sans);
   font-weight: 600;
   font-size: 12px;
   color: var(--text-0);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.grid .col-type {
-  display: block;
+.g-hcell .col-type {
   font-size: 9.5px;
   font-weight: 400;
   letter-spacing: 0.03em;
-  margin-top: 2px;
   text-transform: lowercase;
 }
 .col-type.t-num {
@@ -810,10 +807,46 @@ select {
 .col-type.t-bool {
   color: var(--t-bool);
 }
-.grid td.num {
+.g-hcell.rownum {
+  position: sticky;
+  left: 0;
+  z-index: 4;
+  background: var(--bg-1);
+  align-items: flex-end;
+  justify-content: center;
+  color: var(--text-2);
+  border-right: 1px solid var(--border-strong);
+}
+.grid2-body {
+  position: relative;
+  width: 100%;
+}
+.g-row {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  display: grid;
+}
+.g-cell {
+  line-height: 30px;
+  padding: 0 12px;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-0);
+}
+.g-cell.num {
   text-align: right;
 }
-.grid .rownum {
+.g-cell.null {
+  color: var(--text-2);
+  font-style: italic;
+  opacity: 0.7;
+}
+.g-cell.rownum {
   position: sticky;
   left: 0;
   z-index: 1;
@@ -823,18 +856,10 @@ select {
   border-right: 1px solid var(--border-strong);
   user-select: none;
 }
-.grid thead .rownum {
-  z-index: 3;
-}
-.grid .null {
-  color: var(--text-2);
-  font-style: italic;
-  opacity: 0.7;
-}
-.grid tbody tr:hover td {
+.g-row:hover .g-cell {
   background: rgba(52, 211, 192, 0.05);
 }
-.grid tbody tr:hover .rownum {
+.g-row:hover .g-cell.rownum {
   background: var(--bg-3);
   color: var(--text-1);
 }

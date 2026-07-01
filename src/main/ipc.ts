@@ -99,9 +99,12 @@ export function registerIpcHandlers(): void {
 
       // 페이지네이션: rowLimit이 숫자이고 SELECT/WITH 단일 문일 때만 OFFSET/LIMIT 래핑
       const paginate = typeof rowLimit === 'number' && rowLimit > 0 && canPaginate(req.sql)
+      // 무제한(null)이어도 메모리 보호를 위해 안전 상한까지만 받는다
+      const UNLIMITED_CAP = 50_000
+      const cap = rowLimit == null ? UNLIMITED_CAP : rowLimit
       // 다음 페이지 존재 판단을 위해 1행 더 받아본다
       const execSql = paginate ? wrapPaginated(req.sql, page * rowLimit, rowLimit + 1) : req.sql
-      const fetchCap = paginate ? rowLimit + 1 : rowLimit
+      const fetchCap = paginate ? rowLimit + 1 : cap
 
       try {
         const value = await runQuery(conn, execSql, token, fetchCap)
