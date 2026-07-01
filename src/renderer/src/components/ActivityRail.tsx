@@ -4,6 +4,8 @@ export type ExplorerSection = 'connections' | 'saved' | 'history'
 
 interface Props {
   active: ExplorerSection
+  /** 사이드바가 접혀 있으면 활성 하이라이트를 표시하지 않는다 */
+  collapsed?: boolean
   onChange: (section: ExplorerSection) => void
 }
 
@@ -13,21 +15,24 @@ const ITEMS: { key: ExplorerSection; label: string; icon: JSX.Element }[] = [
   { key: 'history', label: 'History', icon: <IconClock /> }
 ]
 
-export function ActivityRail({ active, onChange }: Props): JSX.Element {
+export function ActivityRail({ active, collapsed = false, onChange }: Props): JSX.Element {
   return (
     <nav className="rail">
-      {ITEMS.map((it) => (
-        <button
-          key={it.key}
-          className={'rail-btn' + (active === it.key ? ' active' : '')}
-          title={it.label}
-          aria-label={it.label}
-          aria-pressed={active === it.key}
-          onClick={() => onChange(it.key)}
-        >
-          {it.icon}
-        </button>
-      ))}
+      {ITEMS.map((it) => {
+        const isActive = active === it.key && !collapsed
+        return (
+          <button
+            key={it.key}
+            className={'rail-btn' + (isActive ? ' active' : '')}
+            title={it.label}
+            aria-label={it.label}
+            aria-pressed={isActive}
+            onClick={() => onChange(it.key)}
+          >
+            {it.icon}
+          </button>
+        )
+      })}
       <span className="rail-spacer" />
     </nav>
   )

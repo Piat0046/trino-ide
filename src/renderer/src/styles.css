@@ -218,14 +218,40 @@ select {
 }
 
 /* ===== 익스플로러 ===== */
+/* 너비는 App이 인라인 style로 지정(드래그 조절). 구분선은 .splitter가 담당. */
 .explorer {
-  width: var(--explorer-w);
   flex-shrink: 0;
   background: var(--bg-1);
-  border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow: hidden;
+}
+/* explorer ↔ workspace 사이 드래그 스플리터 */
+.splitter {
+  position: relative;
+  width: 6px;
+  flex-shrink: 0;
+  cursor: col-resize;
+  background: transparent;
+  z-index: 5;
+}
+.splitter::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 1px;
+  background: var(--border);
+  transition:
+    background 0.12s ease,
+    width 0.12s ease;
+}
+.splitter:hover::after,
+.splitter:active::after {
+  width: 2px;
+  background: var(--accent);
 }
 .explorer-header {
   display: flex;

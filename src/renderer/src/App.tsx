@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import type {
   HistoryEntry,
   HostConfig,
@@ -18,12 +18,17 @@ import { StatusBar } from './components/StatusBar'
 import { SaveQueryDialog, type SaveQueryResult } from './components/SaveQueryDialog'
 import { PromptDialog } from './components/PromptDialog'
 import { CloseTabDialog } from './components/CloseTabDialog'
-import { IconPlus } from './components/icons'
+import { IconChevronLeft, IconPlus } from './components/icons'
 import { type EditorTab, isDirty, makeBound, makeScratch, nextUntitled } from './lib/tabs'
 
 const api = window.api
 
 const EMPTY_LIBRARY: SavedLibrary = { folders: [], queries: [] }
+
+// explorer 사이드바 크기 범위
+const MIN_EXPLORER = 190
+const MAX_EXPLORER = 460
+const DEFAULT_EXPLORER = 264
 
 interface PromptConfig {
   title: string
@@ -36,6 +41,13 @@ export default function App(): JSX.Element {
   const [hosts, setHosts] = useState<HostConfig[]>([])
   const [selectedHostId, setSelectedHostId] = useState<string | null>(null)
   const [section, setSection] = useState<ExplorerSection>('connections')
+  const [explorerWidth, setExplorerWidth] = useState<number>(() => {
+    const v = Number(localStorage.getItem('explorerWidth'))
+    return Number.isFinite(v) && v >= MIN_EXPLORER && v <= MAX_EXPLORER ? v : DEFAULT_EXPLORER
+  })
+  const [explorerCollapsed, setExplorerCollapsed] = useState<boolean>(
+    () => localStorage.getItem('explorerCollapsed') === '1'
+  )
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingHost, setEditingHost] = useState<HostConfig | null>(null)
 
@@ -353,7 +365,51 @@ export default function App(): JSX.Element {
   const selectedHost = hosts.find((h) => h.id === activeHostId) ?? null
   const tabViews = tabs.map((t) => ({ id: t.id, title: tabTitle(t), dirty: isDirty(t) }))
 
+  // 사이드바 크기/접힘 상태 영속화(localStorage)
+  useEffect(() => {
+    localStorage.setItem('explorerWidth', String(explorerWidth))
+  }, [explorerWidth])
+  useEffect(() => {
+    localStorage.setItem('explorerCollapsed', explorerCollapsed ? '1' : '0')
+  }, [explorerCollapsed])
+
+  // 레일 아이콘: 접힌 상태면 펼치고, 같은 섹션을 다시 누르면 접는다(VS Code 관례)
+  const onRailChange = (next: ExplorerSection): void => {
+    if (explorerCollapsed) {
+      setExplorerCollapsed(false)
+      setSection(next)
+    } else if (next === section) {
+      setExplorerCollapsed(true)
+    } else {
+      setSection(next)
+    }
+  }
+
+  // 스플리터 드래그로 explorer 너비 조절(min/max 범위)
+  const startExplorerResize = (e: ReactMouseEvent): void => {
+    e.preventDefault()
+    const startX = e.clientX
+    const startW = explorerWidth
+    const move = (ev: MouseEvent): void => {
+      const w = Math.min(MAX_EXPLORER, Math.max(MIN_EXPLORER, startW + (ev.clientX - startX)))
+      setExplorerWidth(w)
+    }
+    const end = (): void => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', end)
+      document.body.classList.remove('col-resizing')
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', end)
+    document.body.classList.add('col-resizing')
+  }
+
   const explorerHeader = (): JSX.Element => {
+    const collapseBtn = (
+      <button className="icon-btn" title="사이드바 접기" onClick={() => setExplorerCollapsed(true)}>
+        <IconChevronLeft size={15} />
+      </button>
+    )
     if (section === 'connections') {
       return (
         <div className="explorer-header">
@@ -362,6 +418,7 @@ export default function App(): JSX.Element {
             <button className="icon-btn" title="연결 추가" onClick={openAdd}>
               <IconPlus size={15} />
             </button>
+            {collapseBtn}
           </div>
         </div>
       )
@@ -374,6 +431,7 @@ export default function App(): JSX.Element {
             <button className="icon-btn" title="새 폴더" onClick={createFolder}>
               <IconPlus size={15} />
             </button>
+            {collapseBtn}
           </div>
         </div>
       )
@@ -385,6 +443,7 @@ export default function App(): JSX.Element {
           <button className="icon-btn" title="전체 삭제" disabled={history.length === 0} onClick={clearHistory}>
             ⌫
           </button>
+          {collapseBtn}
         </div>
       </div>
     )
@@ -393,8 +452,9 @@ export default function App(): JSX.Element {
   return (
     <div className="app">
       <div className="app-body">
-        <ActivityRail active={section} onChange={setSection} />
-        <aside className="explorer">
+        <ActivityRail active={section} collapsed={explorerCollapsed} onChange={onRailChange} />
+        {!explorerCollapsed && (
+        <aside className="explorer" style={{ width: explorerWidth }}>
           {explorerHeader()}
           {section === 'connections' && (
             <HostList
@@ -427,6 +487,17 @@ export default function App(): JSX.Element {
             />
           )}
         </aside>
+        )}
+        {!explorerCollapsed && (
+          <div
+            className="splitter"
+            role="separator"
+            aria-orientation="vertical"
+            title="드래그로 크기 조절 · 더블클릭으로 접기"
+            onMouseDown={startExplorerResize}
+            onDoubleClick={() => setExplorerCollapsed(true)}
+          />
+        )}
 
         <div className="workspace">
           <SqlEditor

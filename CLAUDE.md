@@ -72,6 +72,7 @@ renderer (React)  ──IPC──▶  main process  ──HTTP──▶  Trino
 
 - `renderer/src/` — React UI. **보편적 DB IDE 레이아웃**: 좌측 `ActivityRail`(아이콘) + `explorer`(섹션 패널) + `workspace`(에디터/결과) + 하단 `StatusBar`. `App.tsx`가 상태/오케스트레이션:
   - `ActivityRail` (Connections/Saved/History 섹션 전환). explorer 헤더(제목+추가 액션)는 `App`이 섹션별로 렌더.
+    - **explorer 사이드바 크기조절/접기**(`App.tsx`): explorer↔workspace 사이 `.splitter` 드래그로 너비 조절(`MIN_EXPLORER 190`~`MAX_EXPLORER 460`px, `explorerWidth` state를 인라인 `style`로 적용). 완전 접기/펼치기(`explorerCollapsed`) — 헤더의 접기 버튼(`<`)·스플리터 더블클릭으로 접고, 레일 아이콘 클릭으로 펼침(같은 섹션 아이콘 재클릭=접기, VS Code 관례). `explorerWidth`/`explorerCollapsed`는 **localStorage 영속화**(렌더러 전용, main 무관). 접힘 시 `ActivityRail`은 `collapsed` prop으로 활성 하이라이트를 끈다.
   - `HostList` (연결 목록/선택/편집/삭제) — 추가는 헤더 +, 선택은 `App.selectedHostId` 갱신(에디터 툴바 드롭다운과 동기).
   - `HistoryList` (실행 기록; **클릭=에디터 로드, 더블클릭=재실행**, 삭제된 host는 표시만)
   - `SavedPanel` (폴더 트리; 쿼리 **클릭=로드/더블클릭=실행**·이름변경·삭제. 폴더 생성은 헤더 +)
