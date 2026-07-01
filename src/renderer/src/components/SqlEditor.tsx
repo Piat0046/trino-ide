@@ -1,9 +1,12 @@
-import { useEffect, useState, type KeyboardEvent } from 'react'
-import CodeMirror from '@uiw/react-codemirror'
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import CodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror'
 import { sql } from '@codemirror/lang-sql'
 import type { HostConfig } from '@shared/types'
 import { cmTheme } from '../lib/cmTheme'
-import { IconPlay, IconSave, IconStop } from './icons'
+import { activeStatement } from '../lib/cmActiveStatement'
+import { statementAtCursor } from '../lib/sqlStatements'
+import { formatSql } from '../lib/formatSql'
+import { IconFormat, IconPlay, IconSave, IconStop } from './icons'
 import { EditorTabs, type TabView } from './EditorTabs'
 
 interface Props {
@@ -16,7 +19,8 @@ interface Props {
   // active editor
   sql: string
   onChange: (value: string) => void
-  onRun: () => void
+  /** 실행할 SQL(커서가 놓인 문장 하나) */
+  onRun: (sql: string) => void
   onCancel: () => void
   onSave: () => void
   running: boolean
@@ -53,6 +57,7 @@ export function SqlEditor({
   rowLimit,
   onRowLimitChange
 }: Props): JSX.Element {
+  const cmRef = useRef<ReactCodeMirrorRef>(null)
   const unlimited = rowLimit === null
   const [limitText, setLimitText] = useState(unlimited ? String(FALLBACK_LIMIT) : String(rowLimit))
 
@@ -60,10 +65,37 @@ export function SqlEditor({
     if (rowLimit !== null) setLimitText(String(rowLimit))
   }, [rowLimit])
 
+  /** 커서가 놓인 문장 본문. view가 없으면 전체 텍스트로 폴백. */
+  const activeStatementText = (): string => {
+    const view = cmRef.current?.view
+    if (!view) return sqlText
+    const doc = view.state.doc.toString()
+    return statementAtCursor(doc, view.state.selection.main.head)?.text ?? ''
+  }
+
+  const handleRun = (): void => {
+    if (running || !hostId) return
+    const stmt = activeStatementText()
+    if (!stmt.trim()) return
+    onRun(stmt)
+  }
+
+  const handleFormat = (): void => {
+    const view = cmRef.current?.view
+    if (!view) return
+    const current = view.state.doc.toString()
+    const formatted = formatSql(current)
+    if (formatted === current) return
+    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: formatted } })
+  }
+
   const handleKeyDown = (e: KeyboardEvent): void => {
-    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'f' || e.key === 'F')) {
       e.preventDefault()
-      if (!running && hostId) onRun()
+      handleFormat()
+    } else if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+      e.preventDefault()
+      handleRun()
     } else if ((e.metaKey || e.ctrlKey) && (e.key === 's' || e.key === 'S')) {
       e.preventDefault()
       onSave()
@@ -142,6 +174,10 @@ export function SqlEditor({
           </label>
         </div>
 
+        <button onClick={handleFormat} disabled={!sqlText.trim()} title="포맷 (⇧⌘F)">
+          <IconFormat size={14} />
+          포맷
+        </button>
         <button
           onClick={onSave}
           disabled={!sqlText.trim()}
@@ -156,7 +192,12 @@ export function SqlEditor({
             중지
           </button>
         ) : (
-          <button className="primary" onClick={onRun} disabled={!hostId} title="실행 (⌘↵)">
+          <button
+            className="primary"
+            onClick={handleRun}
+            disabled={!hostId}
+            title="현재 문장 실행 (⌘↵)"
+          >
             <IconPlay size={13} />
             실행
           </button>
@@ -165,10 +206,11 @@ export function SqlEditor({
 
       <div className="cm-host">
         <CodeMirror
+          ref={cmRef}
           value={sqlText}
           height="100%"
           theme="dark"
-          extensions={[sql(), cmTheme]}
+          extensions={[sql(), cmTheme, activeStatement]}
           onChange={onChange}
         />
       </div>

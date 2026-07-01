@@ -68,6 +68,17 @@ export const IconSave = ({ size }: IconProps): JSX.Element =>
     size
   )
 
+export const IconFormat = ({ size }: IconProps): JSX.Element =>
+  svg(
+    <>
+      <path d="M4 6h16" />
+      <path d="M8 10h12" />
+      <path d="M4 14h12" />
+      <path d="M8 18h8" />
+    </>,
+    size
+  )
+
 export const IconChevronLeft = ({ size }: IconProps): JSX.Element =>
   svg(<path d="M15 6l-6 6 6 6" />, size)
 

@@ -659,6 +659,11 @@ select {
 .cm-host .cm-editor {
   height: 100%;
 }
+/* 커서가 놓인 문장 = 실행될 단위. 은은한 틸 워시 + 좌측 액센트 바로 "선택됨"을 표시 */
+.cm-host .cm-line.cm-stmt-active {
+  background-color: rgba(52, 211, 192, 0.09);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
 
 /* ===== 결과 페인 ===== */
 .results {

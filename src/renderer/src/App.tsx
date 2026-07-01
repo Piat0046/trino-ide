@@ -195,10 +195,10 @@ export default function App(): JSX.Element {
     void executeQuery(tabId, sqlText, hostId, 0, true)
   }
 
-  const runQuery = (): void => {
+  const runQuery = (sqlToRun: string): void => {
     const t = activeTab
-    if (!t || t.running || !t.hostId) return
-    runFresh(t.id, t.sql, t.hostId)
+    if (!t || t.running || !t.hostId || !sqlToRun.trim()) return
+    runFresh(t.id, sqlToRun, t.hostId)
   }
   const cancelQuery = async (): Promise<void> => {
     if (activeTab?.requestId) await api.cancelQuery(activeTab.requestId)

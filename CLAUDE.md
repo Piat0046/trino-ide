@@ -75,7 +75,11 @@ renderer (React)  ──IPC──▶  main process  ──HTTP──▶  Trino
   - `HostList` (연결 목록/선택/편집/삭제) — 추가는 헤더 +, 선택은 `App.selectedHostId` 갱신(에디터 툴바 드롭다운과 동기).
   - `HistoryList` (실행 기록; **클릭=에디터 로드, 더블클릭=재실행**, 삭제된 host는 표시만)
   - `SavedPanel` (폴더 트리; 쿼리 **클릭=로드/더블클릭=실행**·이름변경·삭제. 폴더 생성은 헤더 +)
-  - `SqlEditor` (`EditorTabs` 탭 스트립 + 툴바[연결 드롭다운·LIMIT 콤보박스+무제한 토글·저장·실행] + CodeMirror). CodeMirror 크롬은 `lib/cmTheme.ts`로 토큰화. ⌘↵ 실행 / ⌘S 저장.
+  - `SqlEditor` (`EditorTabs` 탭 스트립 + 툴바[연결 드롭다운·LIMIT 콤보박스+무제한 토글·**포맷**·저장·실행] + CodeMirror). CodeMirror 크롬은 `lib/cmTheme.ts`로 토큰화. ⌘↵ **현재 문장 실행** / ⌘S 저장 / ⇧⌘F 포맷.
+    - **문장 단위 실행(렌더러 측)**: `;`로 구분된 여러 문장 중 **커서(caret head)가 놓인 문장 하나만** 실행/기록한다(드래그 선택은 무시). `handleRun`이 `cmRef`(=`ReactCodeMirrorRef`)의 `view.state`에서 커서 문장 본문을 뽑아 `onRun(sql: string)`으로 올리고, `App.runQuery(sqlToRun)`가 그 문장으로 `runFresh`한다. → **main/ipc/history/client는 그대로**(단일 문장이면 `canPaginate`가 통과, `addHistory`가 그 문장만 저장).
+    - **활성 문장 하이라이트**: `lib/cmActiveStatement.ts`(CodeMirror `StateField`)가 커서 문장 라인에 `.cm-stmt-active`(틸 워시 + 좌측 액센트 바)를 **항상** 칠해 실행 대상을 시각화.
+    - **포맷**: `lib/formatSql.ts` = `sql-formatter`의 `format(sql, { language:'trino', tabWidth:2 })`(키워드 대소문자 **원본 유지**, 파싱 실패 시 원문 반환). 트랜잭션 dispatch라 undo 가능. `sql-formatter`는 렌더러 번들 대상이라 **devDependencies**.
+    - 문장 분리는 `lib/sqlStatements.ts`의 토크나이저 `splitStatements`/`statementAtCursor`(문자열 `'…'`·식별자 `"…"`·`--`/`/* */` 주석 안의 `;`는 무시, `''`/`""` 이스케이프 처리) — 실행·하이라이트·인디케이터가 공유하는 순수 함수.
   - `EditorTabs` (멀티 탭 스트립 + 새 탭 `+`), `CloseTabDialog` (dirty 탭 닫기 3버튼 확인).
   - `ResultsPane` (서브탭 **Results/Messages** + **타입 인지 그리드**[숫자 우정렬·타입 라벨·NULL·헤더/행번호 sticky] + **계기판 푸터**[◀ Page n ▶ · rows · time · scan · bytes]). 그리드는 **`@tanstack/react-virtual` 가상 스크롤**(div 기반, 열 너비는 상위 300행 샘플로 미리 고정, `scrollMargin=HEAD_H`로 sticky 헤더 보정) — 받은 행 전체를 스크롤로 본다(DOM에는 보이는 ~30행만). `orderByWarning` 배너.
     - **무제한 수신은 ipc에서 50,000행 안전 상한**(`UNLIMITED_CAP`)으로 보호 → 초과 시 `truncated`로 "안전 상한 도달, LIMIT 사용" 안내. 더 큰 데이터는 숫자 LIMIT 페이지네이션으로 접근.
