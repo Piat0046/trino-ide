@@ -115,16 +115,39 @@ export async function runQuery(
   }
 }
 
-/** SELECT/WITH 단일 문이면 OFFSET/LIMIT 래핑이 가능 */
+/** 끝의 세미콜론과 그 뒤 줄주석/공백을 제거 */
+function stripTrailing(sql: string): string {
+  return sql.trim().replace(/;\s*(--[^\n]*)?\s*$/, '')
+}
+
+/** 선행 공백/주석(줄·블록)을 반복 제거 */
+function stripLeadingComments(s: string): string {
+  let prev: string
+  let cur = s
+  do {
+    prev = cur
+    cur = cur.replace(/^\s+/, '')
+    cur = cur.replace(/^--[^\n]*\n?/, '') // 줄 주석
+    cur = cur.replace(/^\/\*[\s\S]*?\*\//, '') // 블록 주석
+  } while (cur !== prev)
+  return cur
+}
+
+/**
+ * SELECT/WITH 단일 문이면 OFFSET/LIMIT 래핑이 가능.
+ * 선행 주석(-- , /* *​/)·선행 괄호·끝 주석을 견딘다.
+ */
 export function canPaginate(sql: string): boolean {
-  const s = sql.trim().replace(/;\s*$/, '')
-  if (s.includes(';')) return false // 다중 문은 제외
-  return /^(select|with)\b/i.test(s)
+  const s = stripTrailing(sql)
+  if (!s) return false
+  if (s.includes(';')) return false // 다중 문은 제외(안전상)
+  const head = stripLeadingComments(s).replace(/^\(+\s*/, '')
+  return /^(select|with)\b/i.test(head)
 }
 
 /** 원본 쿼리를 서브쿼리로 감싸 OFFSET/LIMIT 부여 */
 export function wrapPaginated(sql: string, offset: number, limit: number): string {
-  const inner = sql.trim().replace(/;\s*$/, '')
+  const inner = stripTrailing(sql)
   // inner와 OFFSET을 줄바꿈으로 분리해 inner 끝의 줄주석(--)이 삼키지 않게 함
   return `SELECT * FROM (\n${inner}\n) AS _trino_ide_page\nOFFSET ${offset} LIMIT ${limit}`
 }
