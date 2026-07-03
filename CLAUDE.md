@@ -152,6 +152,24 @@ renderer (React)  ──IPC──▶  main process  ──HTTP──▶  Trino
 - 다른 OS/아키텍처(intel x64, Windows, Linux)는 `electron-builder.yml`의 `mac.target.arch`/`win`/`linux`를 추가. 단 Windows .exe는 macOS 크로스 빌드가 제한적이라 해당 OS에서 빌드 권장.
 - 앱 아이콘 미설정(기본 Electron 아이콘). 커스텀 아이콘은 `build/icon.icns` 추가.
 
+## 개발 워크플로 (git worktree)
+기능/이슈 작업은 **`.worktree/` 아래 격리된 git worktree + 전용 브랜치**에서 한다(메인 워킹트리의 `main`은 깨끗하게 유지). 워크트리 루트 `.worktree/`는 **`.gitignore`에 등록**돼 레포에 커밋되지 않는다.
+
+- **새 작업 시작**:
+  ```bash
+  git worktree add .worktree/<작업명> -b feat/<이슈번호>-<키워드> main
+  # 워크트리는 node_modules를 공유하지 않으므로 루트 것을 심링크로 연결
+  ln -s ../../node_modules .worktree/<작업명>/node_modules
+  ```
+  심링크로 electron 바이너리·의존성을 공유하므로, 그 디렉터리에서 `npm run dev`/`typecheck`/`build`가 그대로 동작한다(별도 `npm install` 불필요).
+- **브랜치 네이밍**: `feat/<이슈번호>-<키워드>` (예: `feat/14-metadata-store`). 커밋은 기존 conventional 스타일(`feat(scope): …`) 유지.
+- **작업 종료/머지 후 정리**:
+  ```bash
+  git worktree remove .worktree/<작업명>
+  git branch -d feat/<...>            # 머지됐으면
+  ```
+- 예: 에픽 #13(메타데이터 자동완성)은 `.worktree/metadata-store`(`feat/14-metadata-store`)에서 작업.
+
 ## 이슈 트래킹 / 기능 계획 워크플로
 새 기능/큰 변경은 **GitHub 이슈로 등록**한다. 저장소 `Piat0046/trino-ide`(issues 활성).
 
