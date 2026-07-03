@@ -297,12 +297,23 @@ export default function App(): JSX.Element {
 
   // 탭이 속한 pane에서 닫는다(비면 새 스크래치로 대체)
   const doCloseTab = (id: string): void => {
-    setPanes((prev) =>
-      prev.map((p) => {
-        if (!p.tabs.some((t) => t.id === id)) return p
+    const owner = panes.find((p) => p.tabs.some((t) => t.id === id))
+    if (!owner) return
+    const tab = owner.tabs.find((t) => t.id === id)
+    // 실행 중 탭이면 서버 쿼리부터 취소(리소스 정리)
+    if (tab?.running && tab.requestId) void api.cancelQuery(tab.requestId)
+
+    // 창의 마지막 탭 + 분할 상태면 그 창을 접어 1분할로 되돌린다
+    const collapse = owner.tabs.length === 1 && panes.length > 1
+
+    setPanes((prev) => {
+      if (collapse) return prev.filter((p) => p.id !== owner.id)
+      return prev.map((p) => {
+        if (p.id !== owner.id) return p
         const idx = p.tabs.findIndex((t) => t.id === id)
         const next = p.tabs.filter((t) => t.id !== id)
         if (next.length === 0) {
+          // 단일 창의 마지막 탭 → 항상 탭 1개는 유지되게 새 스크래치로 대체
           const fresh = makeScratch('', selectedHostId, 'Untitled query 1')
           return { ...p, tabs: [fresh], activeTabId: fresh.id }
         }
@@ -310,7 +321,13 @@ export default function App(): JSX.Element {
           p.activeTabId === id ? next[Math.min(idx, next.length - 1)].id : p.activeTabId
         return { ...p, tabs: next, activeTabId }
       })
-    )
+    })
+
+    // 접힌 창이 포커스였으면 남은 창으로 포커스 이동
+    if (collapse) {
+      const survivor = panes.find((p) => p.id !== owner.id)
+      if (survivor) setFocusedPaneId(survivor.id)
+    }
   }
 
   const closeTab = (id: string): void => {
