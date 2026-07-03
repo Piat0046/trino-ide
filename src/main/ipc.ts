@@ -8,7 +8,13 @@ import type {
   SaveFileResult,
   SaveTextInput
 } from '@shared/types'
-import type { AppSettings, CreateQueryInput, UpdateQueryInput } from '@shared/types'
+import type {
+  AppSettings,
+  CreateQueryInput,
+  DeleteNodeInput,
+  ManualUpsertInput,
+  UpdateQueryInput
+} from '@shared/types'
 import { decryptPassword, deleteHost, getStoredHost, listHosts, saveHost } from './store/hosts'
 import { addHistory, clearHistory, deleteHistory, listHistory } from './store/history'
 import {
@@ -22,6 +28,13 @@ import {
 } from './store/savedQueries'
 import { getSettings, updateSettings } from './store/settings'
 import { learnMetadataFromSql } from './learnMetadata'
+import {
+  clearAll as clearAllMetadata,
+  clearLearned as clearLearnedMetadata,
+  deleteNode as deleteMetadataNode,
+  getHostMetadata,
+  upsertManual
+} from './store/metadata'
 import {
   type CancelToken,
   type ResolvedConn,
@@ -201,6 +214,13 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('saved:createQuery', (_e, input: CreateQueryInput) => createQuery(input))
   ipcMain.handle('saved:updateQuery', (_e, input: UpdateQueryInput) => updateQuery(input))
   ipcMain.handle('saved:deleteQuery', (_e, id: string) => deleteQuery(id))
+
+  // ----- metadata -----
+  ipcMain.handle('metadata:get', (_e, hostId: string) => getHostMetadata(hostId))
+  ipcMain.handle('metadata:upsert', (_e, input: ManualUpsertInput) => upsertManual(input))
+  ipcMain.handle('metadata:delete', (_e, input: DeleteNodeInput) => deleteMetadataNode(input))
+  ipcMain.handle('metadata:clearLearned', (_e, hostId: string) => clearLearnedMetadata(hostId))
+  ipcMain.handle('metadata:clearAll', (_e, hostId: string) => clearAllMetadata(hostId))
 
   // ----- settings -----
   ipcMain.handle('settings:get', () => getSettings())

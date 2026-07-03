@@ -23,6 +23,11 @@ const api: TrinoIdeApi = {
   copyToClipboard: (text) => ipcRenderer.invoke('clipboard:write', text),
   saveTextFile: (input) => ipcRenderer.invoke('file:saveText', input),
   openExternal: (url) => ipcRenderer.invoke('system:openExternal', url),
+  getMetadata: (hostId) => ipcRenderer.invoke('metadata:get', hostId),
+  upsertMetadata: (input) => ipcRenderer.invoke('metadata:upsert', input),
+  deleteMetadata: (input) => ipcRenderer.invoke('metadata:delete', input),
+  clearLearnedMetadata: (hostId) => ipcRenderer.invoke('metadata:clearLearned', hostId),
+  clearAllMetadata: (hostId) => ipcRenderer.invoke('metadata:clearAll', hostId),
   onQueryProgress: (cb) => {
     const listener = (_e: unknown, payload: Parameters<typeof cb>[0]): void => cb(payload)
     ipcRenderer.on('query:progress', listener)
