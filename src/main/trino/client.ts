@@ -171,10 +171,78 @@ export function canPaginate(sql: string): boolean {
   return /^(select|with)\b/i.test(head)
 }
 
-/** 원본 쿼리를 서브쿼리로 감싸 OFFSET/LIMIT 부여 */
+/**
+ * 최상위(괄호 깊이 0, 문자열/식별자/주석 밖) LIMIT/OFFSET/FETCH 절이 있는지.
+ * 서브쿼리 안의 LIMIT이나 문자열/주석 속 단어에 오판하지 않도록 스캔한다.
+ */
+export function hasOwnLimitOffset(sql: string): boolean {
+  let depth = 0
+  const n = sql.length
+  for (let i = 0; i < n; ) {
+    const ch = sql[i]
+    if (ch === '-' && sql[i + 1] === '-') {
+      i += 2
+      while (i < n && sql[i] !== '\n') i++
+      continue
+    }
+    if (ch === '/' && sql[i + 1] === '*') {
+      i += 2
+      while (i < n && !(sql[i] === '*' && sql[i + 1] === '/')) i++
+      i += 2
+      continue
+    }
+    if (ch === "'" || ch === '"') {
+      const q = ch
+      i++
+      while (i < n) {
+        if (sql[i] === q) {
+          if (sql[i + 1] === q) {
+            i += 2 // '' / "" 이스케이프
+            continue
+          }
+          i++
+          break
+        }
+        i++
+      }
+      continue
+    }
+    if (ch === '(') {
+      depth++
+      i++
+      continue
+    }
+    if (ch === ')') {
+      if (depth > 0) depth--
+      i++
+      continue
+    }
+    if (/[A-Za-z_]/.test(ch)) {
+      let j = i + 1
+      while (j < n && /[A-Za-z0-9_]/.test(sql[j])) j++
+      if (depth === 0) {
+        const w = sql.slice(i, j).toLowerCase()
+        if (w === 'limit' || w === 'offset' || w === 'fetch') return true
+      }
+      i = j
+      continue
+    }
+    i++
+  }
+  return false
+}
+
+/**
+ * 원본 쿼리에 OFFSET/LIMIT 페이지네이션 부여.
+ * - 자체 최상위 LIMIT/OFFSET/FETCH가 없으면: 원본 끝에 덧붙인다(최상위 ORDER BY 보존).
+ * - 있으면: 덧붙이면 문법 충돌 → 서브쿼리로 감싼다(안쪽 ORDER BY는 보존 안 될 수 있음).
+ */
 export function wrapPaginated(sql: string, offset: number, limit: number): string {
   const inner = stripTrailing(sql)
-  // inner와 OFFSET을 줄바꿈으로 분리해 inner 끝의 줄주석(--)이 삼키지 않게 함
+  // 두 경로 모두 inner와 OFFSET을 줄바꿈으로 분리해 inner 끝의 줄주석(--)이 삼키지 않게 함
+  if (!hasOwnLimitOffset(inner)) {
+    return `${inner}\nOFFSET ${offset} LIMIT ${limit}`
+  }
   return `SELECT * FROM (\n${inner}\n) AS _trino_ide_page\nOFFSET ${offset} LIMIT ${limit}`
 }
 

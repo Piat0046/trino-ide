@@ -52,11 +52,14 @@ renderer (React)  ──IPC──▶  main process  ──HTTP──▶  Trino
 - `shared/types.ts` — main과 renderer가 **공유하는 타입 전용** 모듈(런타임 코드 금지). `HostConfig`/`HostInput`/`QueryResultPayload`/`IpcResult<T>`/`TrinoIdeApi`의 단일 출처.
 - `main/index.ts` — 앱 생명주기, BrowserWindow 생성. dev면 `ELECTRON_RENDERER_URL` 로드, 아니면 `out/renderer/index.html`.
 - `main/ipc.ts` — 모든 IPC 핸들러 등록. host 입력을 접속 정보(`ResolvedConn`)로 **복호화**하고, 실행 중 쿼리를 `requestId → {token, conn}` 맵으로 추적해 취소를 지원한다. `query:run`은 **성공/실패 모두 `history` 저장소에 자동 기록**(단 `recordHistory=false`면 생략 — 페이지 이동 재실행용)하고, **페이지네이션**을 적용한다(아래).
-- `main/trino/client.ts` — `trino-client`로 쿼리 실행. `runQuery(conn, sql, token, rowLimit, onProgress?)`가 `trino.query()`의 async iterator(nextUri 페이징)를 돌며 columns/data/stats를 누적. `rowLimit`(숫자) 도달 시 서버 쿼리를 `cancel`하고 `truncated` 표시, `rowLimit === null`이면 무제한 수신. 기본값 `DEFAULT_ROW_LIMIT`(300). 페이지네이션 헬퍼 `canPaginate`/`wrapPaginated`/`hasOrderBy`도 여기 있다. 에러는 `TrinoQueryError`(errorName/errorType/errorCode + Trino 런타임 필드 `errorLocation`의 line/column 보존)로 던진다. `onProgress`는 페이지마다 stats를 흘려보내지만 **trino-client의 iterator가 `data`가 빈 stats-only 페이지를 내부에서 건너뛰므로**(`QueryIterator.next()` 재귀 skip) 진행 stats는 **데이터가 실린 페이지에서만** 스트리밍된다(계획/큐 단계는 안 옴 → 라이브 경과 타이머가 그 공백을 메운다).
+- `main/trino/client.ts` — `trino-client`로 쿼리 실행. `runQuery(conn, sql, token, rowLimit, onProgress?)`가 `trino.query()`의 async iterator(nextUri 페이징)를 돌며 columns/data/stats를 누적. `rowLimit`(숫자) 도달 시 서버 쿼리를 `cancel`하고 `truncated` 표시, `rowLimit === null`이면 무제한 수신. 기본값 `DEFAULT_ROW_LIMIT`(300). 페이지네이션 헬퍼 `canPaginate`/`wrapPaginated`/`hasOwnLimitOffset`/`hasOrderBy`도 여기 있다. 에러는 `TrinoQueryError`(errorName/errorType/errorCode + Trino 런타임 필드 `errorLocation`의 line/column 보존)로 던진다. `onProgress`는 페이지마다 stats를 흘려보내지만 **trino-client의 iterator가 `data`가 빈 stats-only 페이지를 내부에서 건너뛰므로**(`QueryIterator.next()` 재귀 skip) 진행 stats는 **데이터가 실린 페이지에서만** 스트리밍된다(계획/큐 단계는 안 옴 → 라이브 경과 타이머가 그 공백을 메운다).
 
 ### 페이지네이션 (방식 B — 매 페이지 OFFSET/LIMIT 재실행)
 - `rowLimit`이 **숫자(=페이지 크기)**이고 SQL이 **SELECT/WITH 단일 문**(`canPaginate`)일 때만 활성. 무제한/비SELECT(SHOW/DESCRIBE/DDL 등)는 비활성(단일 실행).
-- ipc가 원본 SQL을 `SELECT * FROM ( <원본> ) AS _trino_ide_page OFFSET page*size LIMIT size+1`로 래핑(`wrapPaginated`). **+1행을 받아 `hasNext` 판정** 후 size로 잘라낸다.
+- `wrapPaginated`는 OFFSET/LIMIT을 **두 방식**으로 부여한다(`page*size` OFFSET, `size+1` LIMIT — **+1행으로 `hasNext` 판정** 후 size로 잘라냄):
+  - 원본에 **자체 최상위 `LIMIT`/`OFFSET`/`FETCH`가 없으면** → 원본 끝에 **덧붙임**(`<원본>\nOFFSET .. LIMIT ..`). **최상위 `ORDER BY`가 그대로 유지**돼 정렬이 보존된다.
+  - 있으면(덧붙이면 문법 충돌) → `SELECT * FROM ( <원본> ) AS _trino_ide_page OFFSET .. LIMIT ..`로 **서브쿼리 래핑**. ⚠ 이 경로에선 안쪽 `ORDER BY`가 보존되지 않을 수 있음(알려진 한계).
+  - "최상위" 판별은 `hasOwnLimitOffset`이 **괄호 깊이 + 문자열/식별자/주석을 인식**해 서브쿼리 속 LIMIT이나 문자열·주석 속 단어에 오판하지 않는다.
 - Trino는 결과 커서가 없어 페이지마다 쿼리를 **재실행**한다(stateless). `ORDER BY`가 없으면 페이지 간 순서가 보장되지 않아 `orderByWarning`으로 경고. 큰 OFFSET일수록 서버 재연산 비용↑.
 - renderer는 `result.page`/`hasNext`로 ◀▶ 이동, 페이지 이동 시 `query:run`에 `page±1` + `recordHistory:false`로 재요청한다.
 - `main/store/settings.ts` — 앱 전역 설정(`<userData>/settings.json`). 현재 `rowLimit`(기본 300, `null`=무제한). `getSettings`/`updateSettings`.
