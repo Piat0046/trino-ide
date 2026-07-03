@@ -938,6 +938,304 @@ select {
   box-shadow: inset 0 0 0 1.5px var(--accent);
   color: var(--accent-strong);
 }
+
+/* Messages 탭: 서버로 보낸 실제 SQL */
+.msg-sql {
+  margin-top: 14px;
+}
+.msg-sql-head,
+.sql-pop-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+  color: var(--text-2);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.msg-sql-body {
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-0);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-x: auto;
+}
+
+/* 결과 푸터: 실행 SQL 팝오버 */
+.sql-pop-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+.sql-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-1);
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+}
+.sql-btn:hover {
+  color: var(--text-0);
+  border-color: var(--border-strong);
+}
+.sql-btn.active {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.sql-pop {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: 30;
+  width: min(560px, 60vw);
+  max-height: 300px;
+  overflow: auto;
+  padding: 10px 12px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5);
+}
+.sql-pop pre {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-0);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ===== Messages: 실행 통계 카드 ===== */
+.msg-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.msg-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.msg-badge.ok {
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+.msg-badge.warn {
+  color: var(--warn);
+  background: var(--warn-dim);
+}
+.msg-badge-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.qid-chip {
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 7px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-2);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+.qid-chip:hover {
+  color: var(--text-0);
+  border-color: var(--border-strong);
+}
+.msg-keyrow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  margin-bottom: 12px;
+  color: var(--text-1);
+  font-family: var(--mono);
+}
+.msg-keyrow b {
+  color: var(--text-0);
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+.warn-list {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  background: var(--warn-dim);
+  border: 1px solid var(--warn);
+  border-radius: var(--r-sm);
+}
+.warn-list-head {
+  color: var(--warn);
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+.warn-item {
+  color: var(--text-0);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.msg-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.stat-groups {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 24px;
+  margin-bottom: 14px;
+  padding: 12px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+}
+.stat-group:has(.stages-toggle) {
+  grid-column: 1 / -1;
+}
+.stat-group-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  color: var(--text-2);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.prov-tag {
+  color: var(--warn);
+  background: var(--warn-dim);
+  padding: 0 5px;
+  border-radius: 3px;
+  font-size: 9px;
+}
+.stat-grid {
+  display: grid;
+  gap: 3px;
+}
+.stat-pair {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+}
+.stat-label {
+  color: var(--text-2);
+}
+.stat-value {
+  color: var(--text-0);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+.stat-value.provisional {
+  color: var(--text-2);
+  opacity: 0.65;
+}
+.stages-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 0;
+  background: transparent;
+  border: none;
+  color: var(--text-1);
+  font-size: 11px;
+  cursor: pointer;
+}
+.stages-toggle:hover {
+  color: var(--text-0);
+}
+.stage-list {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.stage-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-1);
+  white-space: nowrap;
+  overflow-x: auto;
+}
+.stage-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.stage-dot.ok {
+  background: var(--accent);
+}
+.stage-dot.run {
+  background: var(--warn);
+}
+.stage-name {
+  color: var(--text-0);
+}
+.stage-tag {
+  color: var(--text-2);
+  background: var(--bg-3);
+  padding: 0 5px;
+  border-radius: 3px;
+  font-size: 9px;
+}
+.stage-metrics {
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+.stage-fail {
+  color: var(--danger);
+  background: var(--danger-dim);
+  padding: 0 5px;
+  border-radius: 3px;
+  font-size: 9px;
+}
+/* 푸터 글랜스: 확정/잠정 dot + 경고 수 */
+.ft-state {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.ft-state.ok {
+  background: var(--accent);
+}
+.ft-state.warn {
+  background: var(--warn);
+}
+.ft-warn {
+  color: var(--warn);
+  font-size: 11px;
+}
 .cols-menu {
   position: absolute;
   top: calc(100% + 4px);

@@ -1,4 +1,4 @@
-import { clipboard, dialog, ipcMain } from 'electron'
+import { clipboard, dialog, ipcMain, shell } from 'electron'
 import { writeFile } from 'node:fs/promises'
 import type {
   HostInput,
@@ -214,4 +214,8 @@ export function registerIpcHandlers(): void {
       return { saved: true, path: filePath }
     }
   )
+  // 외부 브라우저로 열기(http/https만 허용 — 안전)
+  ipcMain.handle('system:openExternal', async (_e, url: string) => {
+    if (/^https?:\/\//i.test(url)) await shell.openExternal(url)
+  })
 }

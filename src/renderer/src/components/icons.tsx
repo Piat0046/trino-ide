@@ -88,6 +88,15 @@ export const IconSplit = ({ size }: IconProps): JSX.Element =>
     size
   )
 
+export const IconCode = ({ size }: IconProps): JSX.Element =>
+  svg(
+    <>
+      <path d="M9 8l-4 4 4 4" />
+      <path d="M15 8l4 4-4 4" />
+    </>,
+    size
+  )
+
 export const IconSearch = ({ size }: IconProps): JSX.Element =>
   svg(
     <>

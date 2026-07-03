@@ -1,5 +1,28 @@
 import { Trino, BasicAuth, type QueryError, type QueryResult } from 'trino-client'
-import type { QueryResultPayload, QueryStatsSummary } from '@shared/types'
+import type { QueryResultPayload, QueryStatsSummary, StageSummary } from '@shared/types'
+
+/** trino-client의 rootStage(재귀 트리)를 평면 요약 행으로 펼친다 */
+type RawStage = NonNullable<NonNullable<QueryResult['stats']>['rootStage']>
+function flattenStages(stage: RawStage | undefined, depth = 0, out: StageSummary[] = []): StageSummary[] {
+  if (!stage) return out
+  out.push({
+    stageId: stage.stageId,
+    state: stage.state,
+    depth,
+    coordinatorOnly: stage.coordinatorOnly,
+    processedRows: stage.processedRows,
+    processedBytes: stage.processedBytes,
+    physicalInputBytes: stage.physicalInputBytes,
+    cpuTimeMillis: stage.cpuTimeMillis,
+    completedSplits: stage.completedSplits,
+    runningSplits: stage.runningSplits,
+    queuedSplits: stage.queuedSplits,
+    totalSplits: stage.totalSplits,
+    failedTasks: stage.failedTasks
+  })
+  for (const sub of stage.subStages ?? []) flattenStages(sub, depth + 1, out)
+  return out
+}
 
 /** rowLimit 미지정 시 사용할 기본 수신 상한. */
 const DEFAULT_ROW_LIMIT = 300
@@ -58,7 +81,18 @@ function mapStats(s: QueryResult['stats']): QueryStatsSummary | undefined {
         state: s.state,
         elapsedMs: s.elapsedTimeMillis,
         processedRows: s.processedRows,
-        processedBytes: s.processedBytes
+        processedBytes: s.processedBytes,
+        cpuTimeMillis: s.cpuTimeMillis,
+        wallTimeMillis: s.wallTimeMillis,
+        queuedTimeMillis: s.queuedTimeMillis,
+        physicalInputBytes: s.physicalInputBytes,
+        peakMemoryBytes: s.peakMemoryBytes,
+        spilledBytes: s.spilledBytes,
+        completedSplits: s.completedSplits,
+        runningSplits: s.runningSplits,
+        queuedSplits: s.queuedSplits,
+        totalSplits: s.totalSplits,
+        nodes: s.nodes
       }
     : undefined
 }
@@ -89,9 +123,13 @@ export async function runQuery(
   const rows: unknown[][] = []
   let truncated = false
   let lastStats: QueryResult['stats']
+  let warnings: string[] = []
+  let infoUri: string | undefined
 
   for await (const page of iter as AsyncIterable<QueryResult>) {
     if (page.id) token.trinoQueryId = page.id
+    if (page.infoUri && !infoUri) infoUri = page.infoUri
+    if (page.warnings && page.warnings.length) warnings = page.warnings // 누적본(최신 페이지)
     if (token.cancelled) break
     if (page.error) throw new TrinoQueryError(page.error)
 
@@ -126,18 +164,25 @@ export async function runQuery(
     }
   }
 
+  const finalStats = mapStats(lastStats)
+  if (finalStats && lastStats?.rootStage) finalStats.stages = flattenStages(lastStats.rootStage)
+
   return {
     columns,
     rows,
     rowCount: rows.length,
     truncated,
-    stats: mapStats(lastStats),
+    stats: finalStats,
     // 페이지네이션 메타는 ipc 레이어에서 채운다(기본: 비페이지네이션)
     paginated: false,
     page: 0,
     pageSize: null,
     hasNext: false,
-    orderByWarning: false
+    orderByWarning: false,
+    executedSql: sql,
+    warnings: warnings.length ? warnings : undefined,
+    infoUri,
+    queryId: token.trinoQueryId
   }
 }
 

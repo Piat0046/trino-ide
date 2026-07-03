@@ -9,9 +9,11 @@ import type {
 import {
   IconArrowDown,
   IconArrowUp,
+  IconChevronDown,
   IconChevronLeft,
   IconChevronRight,
   IconColumns,
+  IconCode,
   IconCopy,
   IconDownload,
   IconEyeOff,
@@ -94,6 +96,16 @@ function formatBytes(n?: number): string {
   return `${value.toFixed(1)} ${units[i]}`
 }
 
+/** ms → 사람이 읽는 시간(ms / s / m s) */
+function formatDuration(ms?: number): string {
+  if (ms == null) return '—'
+  if (ms < 1000) return `${Math.round(ms)} ms`
+  const s = ms / 1000
+  if (s < 60) return `${s.toFixed(2)} s`
+  const m = Math.floor(s / 60)
+  return `${m}m ${String(Math.round(s - m * 60)).padStart(2, '0')}s`
+}
+
 function signatureOf(columns: QueryColumn[]): string {
   return JSON.stringify(columns.map((c) => [c.name, c.type]))
 }
@@ -138,6 +150,10 @@ export function ResultsPane({
   const [colState, setColState] = useState<{ sig: string; cols: ColConfig[] }>({ sig: '', cols: [] })
   const [menuOpen, setMenuOpen] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
+  const [sqlOpen, setSqlOpen] = useState(false)
+  const sqlWrapRef = useRef<HTMLDivElement>(null)
+  const [detailOpen, setDetailOpen] = useState(false)
+  const [stagesOpen, setStagesOpen] = useState(false)
   const [dropTarget, setDropTarget] = useState<number | null>(null)
   const [ctxMenu, setCtxMenu] = useState<CtxMenu | null>(null)
   const [sort, setSort] = useState<SortState | null>(null)
@@ -180,14 +196,15 @@ export function ResultsPane({
 
   // 팝오버 바깥 클릭 닫기(열 메뉴 / 내보내기 메뉴)
   useEffect(() => {
-    if (!menuOpen && !exportOpen) return
+    if (!menuOpen && !exportOpen && !sqlOpen) return
     const onDoc = (e: MouseEvent): void => {
       if (menuOpen && !menuWrapRef.current?.contains(e.target as Node)) setMenuOpen(false)
       if (exportOpen && !exportWrapRef.current?.contains(e.target as Node)) setExportOpen(false)
+      if (sqlOpen && !sqlWrapRef.current?.contains(e.target as Node)) setSqlOpen(false)
     }
     document.addEventListener('mousedown', onDoc)
     return () => document.removeEventListener('mousedown', onDoc)
-  }, [menuOpen, exportOpen])
+  }, [menuOpen, exportOpen, sqlOpen])
 
   // 컨텍스트 메뉴: 바깥 클릭·Esc·스크롤 시 닫기
   useEffect(() => {
@@ -428,6 +445,51 @@ export function ResultsPane({
   const totalWidth = ROWNUM_W + visibleCols.reduce((a, c) => a + c.width, 0)
   const baseIndex = sort ? 0 : result?.paginated ? result.page * (result.pageSize ?? 0) : 0
   const stats = result?.stats
+  // FINISHED가 아니면(truncated/취소로 잠정) 통계가 미확정 — 배너 + 값 흐리게로 신호
+  const finished = !stats || stats.state === 'FINISHED'
+  const num = (n?: number): string | null => (n == null ? null : n.toLocaleString())
+  const statGroups: { title: string; items: [string, string][] }[] = stats
+    ? [
+        {
+          title: '시간',
+          items: [
+            ['CPU 시간', stats.cpuTimeMillis != null ? formatDuration(stats.cpuTimeMillis) : null],
+            ['대기 시간', stats.queuedTimeMillis != null ? formatDuration(stats.queuedTimeMillis) : null],
+            ['Wall 시간', stats.wallTimeMillis != null ? formatDuration(stats.wallTimeMillis) : null]
+          ]
+        },
+        {
+          title: '입출력(I/O)',
+          items: [
+            ['처리 행', num(stats.processedRows)],
+            ['처리 바이트', stats.processedBytes != null ? formatBytes(stats.processedBytes) : null],
+            ['물리 읽기', stats.physicalInputBytes != null ? formatBytes(stats.physicalInputBytes) : null],
+            ['스필(디스크)', stats.spilledBytes ? formatBytes(stats.spilledBytes) : null]
+          ]
+        },
+        {
+          title: '메모리',
+          items: [
+            ['피크 메모리', stats.peakMemoryBytes != null ? formatBytes(stats.peakMemoryBytes) : null]
+          ]
+        },
+        {
+          title: '병렬성',
+          items: [
+            ['워커 노드', num(stats.nodes)],
+            ['스플릿 전체', num(stats.totalSplits)],
+            ['스플릿 완료', num(stats.completedSplits)],
+            ['스플릿 실행중', num(stats.runningSplits)],
+            ['스플릿 대기', num(stats.queuedSplits)]
+          ]
+        }
+      ]
+        .map((g) => ({
+          title: g.title,
+          items: g.items.filter((it): it is [string, string] => it[1] != null)
+        }))
+        .filter((g) => g.items.length > 0)
+    : []
 
   return (
     <section className="results">
@@ -600,14 +662,160 @@ export function ResultsPane({
             </div>
           ) : result ? (
             <div className="messages">
-              <div className="ok-line">✓ 완료 · {stats?.state ?? 'FINISHED'}</div>
-              <div>
-                {result.rowCount.toLocaleString()} rows {result.paginated ? `(page ${result.page + 1})` : ''}
+              {/* 상태 줄: 확정/잠정 배지 + queryId */}
+              <div className="msg-status">
+                <span className={'msg-badge ' + (finished ? 'ok' : 'warn')}>
+                  <span className="msg-badge-dot" />
+                  {finished ? '확정' : '잠정'} · {stats?.state ?? 'FINISHED'}
+                </span>
+                {result.queryId && (
+                  <button
+                    className="qid-chip"
+                    title={result.queryId}
+                    onClick={() => void flashCopy(result.queryId as string, 'Query ID 복사됨')}
+                  >
+                    id {result.queryId}
+                  </button>
+                )}
               </div>
-              {stats?.elapsedMs != null && <div>소요 {(stats.elapsedMs / 1000).toFixed(2)}s</div>}
-              {stats?.processedRows != null && (
-                <div>
-                  스캔 {stats.processedRows.toLocaleString()} rows · {formatBytes(stats.processedBytes)}
+
+              {!finished && (
+                <div className="warn-banner">
+                  결과를 끝까지 받지 않아 통계가 확정되지 않았습니다 (LIMIT 도달 또는 취소). 아래 값은
+                  하한입니다.
+                </div>
+              )}
+
+              {/* 핵심 지표 */}
+              <div className="msg-keyrow">
+                <span>
+                  <b>{result.rowCount.toLocaleString()}</b> rows
+                  {result.paginated ? ` · page ${result.page + 1}` : ''}
+                </span>
+                {stats?.elapsedMs != null && (
+                  <span>
+                    <b>{formatDuration(stats.elapsedMs)}</b> 경과
+                  </span>
+                )}
+                {stats?.processedRows != null && (
+                  <span>
+                    스캔 <b>{stats.processedRows.toLocaleString()}</b> rows ·{' '}
+                    {formatBytes(stats.processedBytes)}
+                  </span>
+                )}
+              </div>
+
+              {/* 경고(있을 때만) */}
+              {result.warnings && result.warnings.length > 0 && (
+                <div className="warn-list">
+                  <div className="warn-list-head">⚠ 경고 {result.warnings.length}건</div>
+                  {result.warnings.map((w, i) => (
+                    <div className="warn-item" key={i}>
+                      {w}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* 액션: Web UI 열기 + 상세 통계 토글 */}
+              <div className="msg-actions">
+                {result.infoUri && (
+                  <button
+                    className="cols-btn"
+                    onClick={() => void api.openExternal(result.infoUri as string)}
+                    title="코디네이터 Web UI · 접근 권한/보관 기간 내에서만 열림"
+                  >
+                    Trino Web UI에서 열기 ↗
+                  </button>
+                )}
+                <button className="cols-btn" onClick={() => setDetailOpen((o) => !o)}>
+                  {detailOpen ? <IconChevronDown size={13} /> : <IconChevronRight size={13} />}
+                  상세 통계
+                </button>
+              </div>
+
+              {/* 상세 통계(접힘) */}
+              {detailOpen && (
+                <div className="stat-groups">
+                  {statGroups.map((g) => (
+                    <div className="stat-group" key={g.title}>
+                      <div className="stat-group-title">
+                        {g.title}
+                        {!finished && <span className="prov-tag">잠정</span>}
+                      </div>
+                      <div className="stat-grid">
+                        {g.items.map(([label, value]) => (
+                          <div className="stat-pair" key={label}>
+                            <span className="stat-label">{label}</span>
+                            <span
+                              className={
+                                'stat-value' +
+                                (!finished && (label === '피크 메모리' || label.startsWith('스필'))
+                                  ? ' provisional'
+                                  : '')
+                              }
+                            >
+                              {value}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+
+                  {/* 스테이지(이중 접힘) */}
+                  {stats?.stages && stats.stages.length > 0 && (
+                    <div className="stat-group">
+                      <button className="stages-toggle" onClick={() => setStagesOpen((o) => !o)}>
+                        {stagesOpen ? <IconChevronDown size={12} /> : <IconChevronRight size={12} />}
+                        스테이지 ({stats.stages.length})
+                      </button>
+                      {stagesOpen && (
+                        <div className="stage-list">
+                          {stats.stages.map((st, i) => (
+                            <div
+                              className="stage-row"
+                              key={st.stageId}
+                              style={{ paddingLeft: 4 + st.depth * 16 }}
+                              title={st.stageId}
+                            >
+                              <span
+                                className={'stage-dot ' + (st.state === 'FINISHED' ? 'ok' : 'run')}
+                              />
+                              <span className="stage-name">Stage {i}</span>
+                              {st.coordinatorOnly && <span className="stage-tag">coordinator</span>}
+                              <span className="stage-metrics">
+                                {st.processedRows.toLocaleString()} rows · {formatBytes(st.processedBytes)}{' '}
+                                · cpu {formatDuration(st.cpuTimeMillis)} · splits {st.completedSplits}/
+                                {st.totalSplits}
+                                {(st.runningSplits > 0 || st.queuedSplits > 0) &&
+                                  ` (실행 ${st.runningSplits}·대기 ${st.queuedSplits})`}
+                              </span>
+                              {st.failedTasks > 0 && (
+                                <span className="stage-fail">실패 {st.failedTasks}</span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {result.executedSql && (
+                <div className="msg-sql">
+                  <div className="msg-sql-head">
+                    <span>서버로 보낸 SQL</span>
+                    <button
+                      className="cols-btn"
+                      onClick={() => void flashCopy(result.executedSql, '실행 SQL 복사됨')}
+                      title="실행된 SQL 복사"
+                    >
+                      <IconCopy size={13} />복사
+                    </button>
+                  </div>
+                  <pre className="msg-sql-body">{result.executedSql}</pre>
                 </div>
               )}
             </div>
@@ -789,6 +997,15 @@ export function ResultsPane({
 
       {result && !running && (
         <div className="transport">
+          <span
+            className={'ft-state ' + (finished ? 'ok' : 'warn')}
+            title={finished ? '확정된 통계' : '잠정(부분 통계) — 끝까지 수신 안 됨'}
+          />
+          {result.warnings && result.warnings.length > 0 && (
+            <span className="ft-warn" title="Trino 경고 있음(Messages 참고)">
+              ⚠ {result.warnings.length}
+            </span>
+          )}
           {result.paginated && (
             <div className="pager">
               <button onClick={onPrevPage} disabled={result.page === 0} title="이전 페이지">
@@ -825,6 +1042,32 @@ export function ResultsPane({
             </span>
           )}
           <span className="spacer" />
+          {result.executedSql && (
+            <div className="sql-pop-wrap" ref={sqlWrapRef}>
+              <button
+                className={'sql-btn' + (sqlOpen ? ' active' : '')}
+                onClick={() => setSqlOpen((o) => !o)}
+                title="서버로 보낸 실제 SQL 보기"
+              >
+                <IconCode size={13} /> SQL
+              </button>
+              {sqlOpen && (
+                <div className="sql-pop">
+                  <div className="sql-pop-head">
+                    <span>서버로 보낸 SQL</span>
+                    <button
+                      className="cols-btn"
+                      onClick={() => void flashCopy(result.executedSql, '실행 SQL 복사됨')}
+                      title="실행된 SQL 복사"
+                    >
+                      <IconCopy size={13} />복사
+                    </button>
+                  </div>
+                  <pre>{result.executedSql}</pre>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
     </section>

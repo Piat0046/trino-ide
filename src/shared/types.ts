@@ -33,11 +33,43 @@ export interface QueryColumn {
   type: string
 }
 
+/** 스테이지(rootStage) 트리를 평면화한 요약 행 */
+export interface StageSummary {
+  stageId: string
+  state: string
+  /** 트리 깊이(들여쓰기용) */
+  depth: number
+  coordinatorOnly: boolean
+  processedRows: number
+  processedBytes: number
+  physicalInputBytes: number
+  cpuTimeMillis: number
+  completedSplits: number
+  runningSplits: number
+  queuedSplits: number
+  totalSplits: number
+  failedTasks: number
+}
+
 export interface QueryStatsSummary {
   state: string
   elapsedMs?: number
   processedRows?: number
   processedBytes?: number
+  // ↓ 이미 응답에 들어오지만 안 쓰던 '공짜' 계측치(추가 요청 없음)
+  cpuTimeMillis?: number
+  wallTimeMillis?: number
+  queuedTimeMillis?: number
+  physicalInputBytes?: number
+  peakMemoryBytes?: number
+  spilledBytes?: number
+  completedSplits?: number
+  runningSplits?: number
+  queuedSplits?: number
+  totalSplits?: number
+  nodes?: number
+  /** 스테이지별 요약(최종 payload에만 채움 — 진행 스트림엔 없음) */
+  stages?: StageSummary[]
 }
 
 export interface QueryResultPayload {
@@ -57,6 +89,14 @@ export interface QueryResultPayload {
   hasNext: boolean
   /** 페이지네이션인데 원본에 ORDER BY가 없어 순서가 보장되지 않을 수 있음 */
   orderByWarning: boolean
+  /** 실제로 서버에 보낸 SQL(페이지네이션 래핑/덧붙임 포함). 페이지마다 OFFSET이 다르다 */
+  executedSql: string
+  /** Trino 경고(있을 때만). deprecated 문법 등 */
+  warnings?: string[]
+  /** 이 쿼리의 Trino Web UI 상세 페이지 URL(접근 권한·보관 기간 내에서만 열림) */
+  infoUri?: string
+  /** Trino 쿼리 ID(로그/지원 상관용) */
+  queryId?: string
 }
 
 export interface RunQueryRequest {
@@ -185,6 +225,8 @@ export interface TrinoIdeApi {
   copyToClipboard(text: string): Promise<void>
   /** 저장 다이얼로그를 열어 텍스트를 파일로 저장(내보내기) */
   saveTextFile(input: SaveTextInput): Promise<SaveFileResult>
+  /** 외부 브라우저로 URL 열기(http/https만). Trino Web UI(infoUri)용 */
+  openExternal(url: string): Promise<void>
   /** 실행 진행 상황 이벤트 구독. 반환값 호출로 구독 해제. */
   onQueryProgress(cb: (progress: QueryProgress) => void): () => void
 }
