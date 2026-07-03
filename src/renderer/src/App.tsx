@@ -3,6 +3,7 @@ import type {
   HistoryEntry,
   HostConfig,
   HostInput,
+  HostMetadata,
   QueryFolder,
   SavedLibrary,
   SavedQuery
@@ -68,6 +69,8 @@ export default function App(): JSX.Element {
   const [toast, setToast] = useState<string | null>(null)
   const askConfirm = (cfg: ConfirmConfig): void => setConfirmState(cfg)
   const [rowLimit, setRowLimit] = useState<number | null>(300)
+  // host별 학습된 메타데이터 캐시(자동완성/관리 섹션 공용). 지연 로드.
+  const [metadata, setMetadata] = useState<Record<string, HostMetadata>>({})
 
   // ----- 멀티 탭 / 분할 pane -----
   // panes.length===1 이면 단일 화면, 2 이면 세로 분할(#3~). focusedPane = 마지막으로 만진 창.
@@ -147,6 +150,10 @@ export default function App(): JSX.Element {
   }, [])
   const refreshHistory = useCallback(async () => setHistory(await api.listHistory()), [])
   const refreshSaved = useCallback(async () => setLibrary(await api.listSaved()), [])
+  const refreshMetadata = useCallback(async (hostId: string) => {
+    const m = await api.getMetadata(hostId)
+    setMetadata((cur) => ({ ...cur, [hostId]: m }))
+  }, [])
 
   useEffect(() => {
     void refreshHosts()
@@ -349,8 +356,11 @@ export default function App(): JSX.Element {
     updateTab(tabId, { running: true, requestId: id, error: null, errorInfo: null, progress: null })
     try {
       const res = await api.runQuery({ hostId, sql: sqlText, requestId: id, rowLimit, page, recordHistory })
-      if (res.ok) updateTab(tabId, { result: res.value, error: null, errorInfo: null })
-      else updateTab(tabId, { error: res.error, errorInfo: res.errorInfo ?? null, result: null })
+      if (res.ok) {
+        updateTab(tabId, { result: res.value, error: null, errorInfo: null })
+        // 성공 실행(페이지 이동 재실행 제외) 후 학습된 메타데이터 갱신
+        if (recordHistory) void refreshMetadata(hostId)
+      } else updateTab(tabId, { error: res.error, errorInfo: res.errorInfo ?? null, result: null })
     } catch (e) {
       updateTab(tabId, { error: e instanceof Error ? e.message : String(e), result: null })
     } finally {
@@ -594,6 +604,11 @@ export default function App(): JSX.Element {
   const activeHostId = activeTab?.hostId ?? null
   const selectedHost = hosts.find((h) => h.id === activeHostId) ?? null
 
+  // 활성 host의 학습된 메타데이터를 최초 1회 지연 로드(소급 학습분 포함 → 쿼리 없이도 자동완성)
+  useEffect(() => {
+    if (activeHostId && metadata[activeHostId] === undefined) void refreshMetadata(activeHostId)
+  }, [activeHostId, metadata, refreshMetadata])
+
   // 사이드바 크기/접힘 상태 영속화(localStorage)
   useEffect(() => {
     localStorage.setItem('explorerWidth', String(explorerWidth))
@@ -710,6 +725,7 @@ export default function App(): JSX.Element {
           hosts={hosts}
           hostId={pa?.hostId ?? null}
           onSelectHost={(id) => selectHostInPane(pane.id, id)}
+          metadata={metadata[pa?.hostId ?? ''] ?? null}
           rowLimit={rowLimit}
           onRowLimitChange={changeRowLimit}
           split={split}
