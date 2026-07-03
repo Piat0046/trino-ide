@@ -217,8 +217,16 @@ export interface MetaNode {
   count: number
 }
 
-/** Phase 2에서 columns를 붙일 자리 */
-export type TableNode = MetaNode
+/** 컬럼 노드. 단일 테이블 SELECT * 결과에서만 학습하거나(learned) 사용자가 직접 추가(manual). */
+export interface ColumnNode {
+  name: string
+  type: string
+  source: MetadataSource
+}
+/** columns는 신뢰 가능한 경우(단일 테이블 SELECT *)에만 채워진다. 없으면 미학습. */
+export interface TableNode extends MetaNode {
+  columns?: ColumnNode[]
+}
 export interface SchemaNode extends MetaNode {
   tables: Record<string, TableNode>
 }
@@ -231,15 +239,18 @@ export interface HostMetadata {
   catalogs: Record<string, CatalogNode>
 }
 
-/** catalog는 항상 존재, schema/table은 계층 깊이에 따라 선택. */
+/** catalog는 항상 존재, schema/table/column은 계층 깊이에 따라 선택. */
 export interface MetadataRef {
   catalog: string
   schema?: string
   table?: string
+  /** 컬럼 레벨 조작 시(수동 추가/삭제). table이 있어야 유효. */
+  column?: string
 }
-/** 수동 추가/수정 입력 */
+/** 수동 추가/수정 입력. column이 있으면 컬럼 추가(columnType 필요). */
 export interface ManualUpsertInput extends MetadataRef {
   hostId: string
+  columnType?: string
 }
 /** 노드 삭제 입력(하위 연쇄삭제) */
 export interface DeleteNodeInput extends MetadataRef {

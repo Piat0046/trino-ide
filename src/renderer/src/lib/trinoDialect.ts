@@ -1,7 +1,7 @@
 import { SQLDialect } from '@codemirror/lang-sql'
 import { LanguageSupport, syntaxTree } from '@codemirror/language'
 import type { Completion, CompletionContext, CompletionResult } from '@codemirror/autocomplete'
-import type { CatalogNode, HostMetadata, MetaNode, SchemaNode } from '@shared/types'
+import type { CatalogNode, ColumnNode, HostMetadata, MetaNode, SchemaNode } from '@shared/types'
 import { TRINO_FUNCTIONS, TRINO_KEYWORDS, TRINO_TYPES } from './trinoWords'
 
 // Trino 방언: 목록은 반드시 소문자(토크나이저가 words[word.toLowerCase()]로 조회 → 하이라이팅).
@@ -120,21 +120,120 @@ function tableCompletion(
   }
 }
 
-/** `catalog.` → schema 목록 / `catalog.schema.` → table 목록. 못 찾으면 null(억제). */
-function dotOptions(meta: HostMetadata, segs: string[]): Completion[] | null {
+function columnCompletion(c: ColumnNode): Completion {
+  const type = c.type || 'column'
+  return {
+    label: c.name,
+    type: 'column',
+    detail: c.source === 'manual' ? `${type} · ✎ 수동` : type,
+    apply: quoteId(c.name),
+    boost: c.source === 'manual' ? 25 : 5
+  }
+}
+
+/** cat/sch/tbl 로 테이블을 찾아 컬럼 완성 목록을 만든다(없거나 컬럼 미학습이면 null). */
+function columnOptions(
+  meta: HostMetadata,
+  ref: { catalog: string; schema: string; table: string }
+): Completion[] | null {
+  const cat = ciGet(meta.catalogs, ref.catalog)
+  if (!cat) return null
+  const sch = ciGet(cat.schemas, ref.schema)
+  if (!sch) return null
+  const tbl = ciGet(sch.tables, ref.table)
+  if (!tbl || !tbl.columns || tbl.columns.length === 0) return null
+  return tbl.columns.map(columnCompletion)
+}
+
+// FROM/JOIN 뒤 별칭 뒤에 올 수 없는(=별칭이 아닌) 키워드들
+const REF_STOP = new Set([
+  'on', 'using', 'where', 'group', 'order', 'having', 'limit', 'offset', 'fetch',
+  'join', 'inner', 'left', 'right', 'full', 'cross', 'natural', 'union', 'intersect',
+  'except', 'window', 'qualify', 'as'
+])
+
+/** 현재 문서의 FROM/JOIN에서 (별칭|테이블이름) → 참조 세그먼트 맵을 만든다(경량, 컬럼 완성용). */
+function parseDocRefs(doc: string): Map<string, string[]> {
+  const map = new Map<string, string[]>()
+  const re = /\b(?:from|join)\s+([A-Za-z_"][\w".]*)(?:\s+(?:as\s+)?([A-Za-z_]\w*))?/gi
+  let m: RegExpExecArray | null
+  while ((m = re.exec(doc))) {
+    const parts = m[1].split('.').map((s) => s.replace(/"/g, '')).filter(Boolean)
+    if (parts.length === 0) continue
+    map.set(parts[parts.length - 1].toLowerCase(), parts)
+    const alias = m[2]
+    if (alias && !REF_STOP.has(alias.toLowerCase())) map.set(alias.toLowerCase(), parts)
+  }
+  return map
+}
+
+/** 이름(별칭/테이블)을 cat/sch/tbl로 해석. 문서에 없으면 기본 catalog/schema의 테이블로. */
+function resolveTableRef(
+  name: string,
+  docRefs: Map<string, string[]>,
+  defCatalog?: string,
+  defSchema?: string
+): { catalog: string; schema: string; table: string } | null {
+  const parts = docRefs.get(name.toLowerCase())
+  let catalog: string | undefined
+  let schema: string | undefined
+  let table: string | undefined
+  if (parts && parts.length >= 3) {
+    catalog = parts[parts.length - 3]
+    schema = parts[parts.length - 2]
+    table = parts[parts.length - 1]
+  } else if (parts && parts.length === 2) {
+    catalog = defCatalog
+    schema = parts[0]
+    table = parts[1]
+  } else if (parts && parts.length === 1) {
+    catalog = defCatalog
+    schema = defSchema
+    table = parts[0]
+  } else {
+    catalog = defCatalog
+    schema = defSchema
+    table = name
+  }
+  if (!catalog || !schema || !table) return null
+  return { catalog, schema, table }
+}
+
+/**
+ * `catalog.` → schema / `catalog.schema.` → table / `catalog.schema.table.` → column.
+ * 1세그먼트가 catalog가 아니면 별칭/테이블로 보고 컬럼을, 2세그먼트가 catalog.schema가
+ * 아니면 schema.table로 보고 컬럼을 제시한다. 못 찾으면 null(억제).
+ */
+function dotOptions(
+  meta: HostMetadata,
+  segs: string[],
+  docRefs: Map<string, string[]>,
+  defCatalog?: string,
+  defSchema?: string
+): Completion[] | null {
   if (segs.length === 1) {
     const cat = ciGet(meta.catalogs, segs[0])
-    if (!cat) return null
-    return Object.entries(cat.schemas).map(([n, node]) => schemaCompletion(n, node, segs[0]))
+    if (cat) return Object.entries(cat.schemas).map(([n, node]) => schemaCompletion(n, node, segs[0]))
+    const ref = resolveTableRef(segs[0], docRefs, defCatalog, defSchema)
+    return ref ? columnOptions(meta, ref) : null
   }
   if (segs.length === 2) {
+    // 1순위: catalog.schema → tables
     const cat = ciGet(meta.catalogs, segs[0])
-    if (!cat) return null
-    const sch = ciGet(cat.schemas, segs[1])
-    if (!sch) return null
-    return Object.entries(sch.tables).map(([n, node]) => tableCompletion(n, node, segs[0], segs[1], false))
+    const sch = cat ? ciGet(cat.schemas, segs[1]) : undefined
+    if (cat && sch) {
+      return Object.entries(sch.tables).map(([n, node]) => tableCompletion(n, node, segs[0], segs[1], false))
+    }
+    // 2순위: schema.table (기본 catalog) → columns
+    if (defCatalog) {
+      const cols = columnOptions(meta, { catalog: defCatalog, schema: segs[0], table: segs[1] })
+      if (cols) return cols
+    }
+    return null
   }
-  // 3+ 세그먼트(컬럼)는 Phase 2
+  if (segs.length === 3) {
+    return columnOptions(meta, { catalog: segs[0], schema: segs[1], table: segs[2] })
+  }
   return null
 }
 
@@ -172,15 +271,16 @@ function makeCompletionSource(getMeta: GetMeta) {
 
     const word = ctx.matchBefore(/[\w]+/)
     const from = word ? word.from : ctx.pos
-    const { meta } = getMeta()
+    const { meta, defCatalog, defSchema } = getMeta()
 
-    // 1) catalog.schema.table 드릴다운: '.' 뒤에서는 입력 단어가 없어도 즉시 완성
-    //    (이 분기를 no-word 가드보다 먼저 둬야 `hive.` / `hive.sales.` 에서 바로 목록이 뜬다)
+    // 1) catalog.schema.table 드릴다운(+ 별칭/테이블.컬럼): '.' 뒤에서는 입력 단어가 없어도 즉시 완성
+    //    (이 분기를 no-word 가드보다 먼저 둬야 `hive.` / `orders.` 에서 바로 목록이 뜬다)
     if (from > 0 && ctx.state.sliceDoc(from - 1, from) === '.') {
       if (!meta) return null
       const segs = chainBeforeDot(ctx, from)
       if (!segs) return null
-      const opts = dotOptions(meta, segs)
+      const docRefs = parseDocRefs(ctx.state.doc.toString())
+      const opts = dotOptions(meta, segs, docRefs, defCatalog, defSchema)
       return opts && opts.length ? { from, options: opts, validFor: /^[\w]*$/ } : null
     }
 

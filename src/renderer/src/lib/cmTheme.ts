@@ -63,7 +63,8 @@ export const cmTheme = EditorView.theme(
     // 학습된 메타데이터(catalog/schema/table): 단일 --meta 색 + 레벨별 글리프(base 테마에 없어 content 직접 지정)
     '.cm-completionIcon-catalog::after': { content: '"▤"', color: 'var(--meta)' },
     '.cm-completionIcon-schema::after': { content: '"◇"', color: 'var(--meta)' },
-    '.cm-completionIcon-table::after': { content: '"▦"', color: 'var(--meta)' }
+    '.cm-completionIcon-table::after': { content: '"▦"', color: 'var(--meta)' },
+    '.cm-completionIcon-column::after': { content: '"│"', color: 'var(--meta)' }
   },
   { dark: true }
 )
