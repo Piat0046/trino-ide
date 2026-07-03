@@ -1,6 +1,6 @@
-import type { MetadataRef } from '@shared/types'
-import { extractTableRefs, toMetadataRef } from './sql/extractTableRefs'
-import { learnReferences } from './store/metadata'
+import type { MetadataRef, QueryColumn } from '@shared/types'
+import { extractTableRefs, singleTableStarRef, toMetadataRef } from './sql/extractTableRefs'
+import { learnColumns, learnReferences } from './store/metadata'
 
 /**
  * 성공한 쿼리 SQL에서 catalog/schema/table을 학습한다(best-effort).
@@ -20,6 +20,29 @@ export function learnMetadataFromSql(
       if (ref) refs.push(ref)
     }
     learnReferences(hostId, refs)
+  } catch {
+    // 학습 실패는 조용히 무시한다.
+  }
+}
+
+/**
+ * 단일 테이블 `SELECT *` 쿼리의 결과 컬럼을 그 테이블에 귀속해 학습한다(best-effort).
+ * 그 외 형태(컬럼 나열·조인·집계 등)는 오귀속 위험이 있어 학습하지 않는다.
+ */
+export function learnColumnsFromResult(
+  hostId: string,
+  sql: string,
+  columns: QueryColumn[],
+  defCatalog?: string,
+  defSchema?: string
+): void {
+  try {
+    if (!columns || columns.length === 0) return
+    const parts = singleTableStarRef(sql)
+    if (!parts) return
+    const ref = toMetadataRef(parts, defCatalog, defSchema)
+    if (!ref) return
+    learnColumns(hostId, ref, columns.map((c) => ({ name: c.name, type: c.type })))
   } catch {
     // 학습 실패는 조용히 무시한다.
   }

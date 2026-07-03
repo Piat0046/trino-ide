@@ -10,6 +10,7 @@ interface Props {
   onSelectHost: (id: string) => void
   onAddSchema: (catalog: string) => void
   onAddTable: (catalog: string, schema: string) => void
+  onAddColumn: (catalog: string, schema: string, table: string) => void
   onDelete: (ref: MetadataRef, label: string) => void
 }
 
@@ -24,6 +25,7 @@ export function MetadataPanel({
   onSelectHost,
   onAddSchema,
   onAddTable,
+  onAddColumn,
   onDelete
 }: Props): JSX.Element {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
@@ -179,36 +181,117 @@ export function MetadataPanel({
                           <ul className="query-list">
                             {tables.length === 0 && <li className="empty small">비어 있음</li>}
                             {tables
-                              .filter(([tn]) => hit(catName) || hit(schName) || hit(tn))
-                              .map(([tblName, tbl]) => (
-                                <li
-                                  key={tblName}
-                                  className="query-row meta-leaf"
-                                  title={`${catName}.${schName}.${tblName}`}
-                                >
-                                  <span className="meta-icon table">▦</span>
-                                  <span className="query-name">{tblName}</span>
-                                  {tbl.source === 'manual' ? (
-                                    <span className="meta-badge">수동</span>
-                                  ) : tbl.count > 0 ? (
-                                    <span className="meta-freq">{tbl.count}×</span>
-                                  ) : null}
-                                  <div className="row-actions">
-                                    <button
-                                      title="삭제"
-                                      onClick={(e) => {
-                                        e.stopPropagation()
-                                        onDelete(
-                                          { catalog: catName, schema: schName, table: tblName },
-                                          tblName
-                                        )
-                                      }}
+                              .filter(
+                                ([tn, tb]) =>
+                                  hit(catName) ||
+                                  hit(schName) ||
+                                  hit(tn) ||
+                                  (tb.columns ?? []).some((c) => hit(c.name))
+                              )
+                              .map(([tblName, tbl]) => {
+                                const cols = tbl.columns ?? []
+                                const hasCols = cols.length > 0
+                                const tKey = catName + ' ' + schName + ' ' + tblName
+                                const tOpen = !collapsed.has(tKey) || !!q
+                                return (
+                                  <li key={tblName} className="folder meta-sub2">
+                                    <div
+                                      className="folder-row"
+                                      title={`${catName}.${schName}.${tblName}`}
+                                      onClick={() => hasCols && toggle(tKey)}
                                     >
-                                      <IconTrash size={12} />
-                                    </button>
-                                  </div>
-                                </li>
-                              ))}
+                                      <span className="caret">
+                                        {hasCols ? (
+                                          tOpen ? (
+                                            <IconChevronDown size={12} />
+                                          ) : (
+                                            <IconChevronRight size={12} />
+                                          )
+                                        ) : (
+                                          <span className="caret-blank" />
+                                        )}
+                                      </span>
+                                      <span className="meta-icon table">▦</span>
+                                      <span className="folder-name">{tblName}</span>
+                                      {tbl.source === 'manual' ? (
+                                        <span className="meta-badge">수동</span>
+                                      ) : tbl.count > 0 ? (
+                                        <span className="meta-freq">{tbl.count}×</span>
+                                      ) : null}
+                                      {hasCols && <span className="folder-count">{cols.length}</span>}
+                                      <div className="row-actions">
+                                        <button
+                                          className="mini"
+                                          title="컬럼 추가(수동)"
+                                          onClick={(e) => {
+                                            e.stopPropagation()
+                                            onAddColumn(catName, schName, tblName)
+                                          }}
+                                        >
+                                          <IconPlus size={12} />
+                                        </button>
+                                        <button
+                                          title="삭제"
+                                          onClick={(e) => {
+                                            e.stopPropagation()
+                                            onDelete(
+                                              { catalog: catName, schema: schName, table: tblName },
+                                              tblName
+                                            )
+                                          }}
+                                        >
+                                          <IconTrash size={12} />
+                                        </button>
+                                      </div>
+                                    </div>
+                                    {hasCols && tOpen && (
+                                      <ul className="query-list">
+                                        {cols
+                                          .filter(
+                                            (c) =>
+                                              hit(catName) ||
+                                              hit(schName) ||
+                                              hit(tblName) ||
+                                              hit(c.name)
+                                          )
+                                          .map((c) => (
+                                            <li
+                                              key={c.name}
+                                              className="query-row meta-col"
+                                              title={`${c.name} ${c.type}`}
+                                            >
+                                              <span className="meta-icon col">│</span>
+                                              <span className="query-name">{c.name}</span>
+                                              {c.type && <span className="meta-coltype">{c.type}</span>}
+                                              {c.source === 'manual' && (
+                                                <span className="meta-badge">수동</span>
+                                              )}
+                                              <div className="row-actions">
+                                                <button
+                                                  title="삭제"
+                                                  onClick={(e) => {
+                                                    e.stopPropagation()
+                                                    onDelete(
+                                                      {
+                                                        catalog: catName,
+                                                        schema: schName,
+                                                        table: tblName,
+                                                        column: c.name
+                                                      },
+                                                      c.name
+                                                    )
+                                                  }}
+                                                >
+                                                  <IconTrash size={12} />
+                                                </button>
+                                              </div>
+                                            </li>
+                                          ))}
+                                      </ul>
+                                    )}
+                                  </li>
+                                )
+                              })}
                           </ul>
                         )}
                       </li>

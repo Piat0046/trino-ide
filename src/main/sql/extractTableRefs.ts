@@ -225,6 +225,48 @@ export function extractTableRefs(sql: string): string[][] {
 }
 
 /**
+ * `SELECT * FROM <단일 테이블>` 인지 판정한다(DISTINCT/ALL 허용, WHERE/ORDER/LIMIT 등은 뒤따라도 됨).
+ * FROM 대상이 조인·콤마·서브쿼리 없이 **정확히 1개 직접 테이블**이고 프로젝션이 **오직 `*`** 일 때만
+ * 그 테이블 세그먼트를 반환한다. 그 외(컬럼 나열·표현식·집계·다중 테이블)는 null → 컬럼 오귀속 방지.
+ */
+export function singleTableStarRef(sql: string): string[] | null {
+  let toks: Tok[]
+  try {
+    toks = tokenize(sql)
+  } catch {
+    return null
+  }
+  let i = 0
+  const isKw = (t: Tok | undefined, kw: string): boolean =>
+    !!t && t.t === 'word' && !t.q && t.v.toUpperCase() === kw
+  if (!isKw(toks[i], 'SELECT')) return null
+  i++
+  if (isKw(toks[i], 'DISTINCT') || isKw(toks[i], 'ALL')) i++
+  // 프로젝션은 정확히 '*' 단독
+  if (!isOp(toks[i], '*')) return null
+  i++
+  if (!isKw(toks[i], 'FROM')) return null
+  i++
+  // FROM 대상: 서브쿼리('(')면 실패
+  if (isOp(toks[i], '(')) return null
+  const item = readItem(toks, i)
+  if (!item.parts) return null
+  // 별칭(AS alias / alias) 하나 건너뛴 뒤, 콤마/JOIN 이면 다중 테이블 → 실패
+  let j = item.next
+  if (isKw(toks[j], 'AS')) j++
+  if (toks[j] && toks[j].t === 'word' && !toks[j].q && !FROM_BOUNDARY.has(toks[j].v.toUpperCase())) j++
+  const nxt = toks[j]
+  if (nxt && (isOp(nxt, ',') || isKw(nxt, 'JOIN'))) return null
+  // information_schema / system 제외(recordRef와 동일 규칙)
+  const parts = item.parts
+  const schema = parts.length >= 2 ? parts[parts.length - 2] : undefined
+  const catalog = parts.length >= 3 ? parts[parts.length - 3] : undefined
+  if (schema && schema.toLowerCase() === 'information_schema') return null
+  if (catalog && catalog.toLowerCase() === 'system') return null
+  return parts
+}
+
+/**
  * 세그먼트 목록을 host 기본 catalog/schema로 보정해 MetadataRef로 만든다.
  * 완전수식(3개)은 그대로. 미수식은 기본값으로 채우되, 채울 기본값이 없으면 null(=스킵).
  */

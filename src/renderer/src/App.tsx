@@ -649,6 +649,16 @@ export default function App(): JSX.Element {
       onSubmit: (name) => applyMeta(h, api.upsertMetadata({ hostId: h, catalog, schema, table: name }))
     })
   }
+  const promptAddColumn = (catalog: string, schema: string, table: string): void => {
+    const h = metaPanelHostId
+    if (!h) return
+    setPromptState({
+      title: `컬럼 추가 · ${schema}.${table}`,
+      placeholder: '컬럼 이름',
+      onSubmit: (name) =>
+        applyMeta(h, api.upsertMetadata({ hostId: h, catalog, schema, table, column: name }))
+    })
+  }
   const deleteMeta = (ref: MetadataRef, label: string): void => {
     const h = metaPanelHostId
     if (!h) return
@@ -890,6 +900,7 @@ export default function App(): JSX.Element {
               onSelectHost={selectMetaHost}
               onAddSchema={promptAddSchema}
               onAddTable={promptAddTable}
+              onAddColumn={promptAddColumn}
               onDelete={deleteMeta}
             />
           )}

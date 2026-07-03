@@ -1944,6 +1944,20 @@ body.col-resizing * {
 .meta-sub > .folder-row {
   padding-left: 20px;
 }
-.meta-leaf {
-  padding-left: 38px;
+.meta-sub2 > .folder-row {
+  padding-left: 34px;
+}
+.meta-col {
+  padding-left: 52px;
+}
+.caret-blank {
+  display: inline-block;
+  width: 13px;
+}
+.meta-coltype {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--t-time);
+  opacity: 0.85;
+  flex: none;
 }

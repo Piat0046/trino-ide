@@ -3,13 +3,15 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type {
   CatalogNode,
+  ColumnNode,
   DeleteNodeInput,
   HostMetadata,
   ManualUpsertInput,
   MetaNode,
   MetadataRef,
   MetadataSource,
-  SchemaNode
+  SchemaNode,
+  TableNode
 } from '@shared/types'
 
 /**
@@ -90,6 +92,18 @@ function nodeAt(host: HostMetadata, ref: MetadataRef): MetaNode | undefined {
   return sch.tables[ref.table]
 }
 
+/** cat/sch/tbl 경로를 생성/확보하고 그 테이블 노드를 반환. */
+function getOrCreateTable(
+  host: HostMetadata,
+  ref: MetadataRef,
+  source: MetadataSource,
+  now: number
+): TableNode | undefined {
+  if (!ref.catalog || !ref.schema || !ref.table) return undefined
+  applyRef(host, { catalog: ref.catalog, schema: ref.schema, table: ref.table }, source, now)
+  return host.catalogs[ref.catalog].schemas[ref.schema].tables[ref.table]
+}
+
 // ───────────────────────────── public API ─────────────────────────────
 
 export function getHostMetadata(hostId: string): HostMetadata {
@@ -112,23 +126,65 @@ export function learnReferences(hostId: string, refs: MetadataRef[]): void {
   write(data)
 }
 
-/** 사용자가 직접 추가/수정한 항목(manual). 가장 깊은 지정 노드는 manual로 보호 승격한다. */
-export function upsertManual(input: ManualUpsertInput): HostMetadata {
-  const { hostId, catalog, schema, table } = input
-  const ref: MetadataRef = { catalog, schema, table }
-  if (!ref.catalog) return getHostMetadata(hostId)
+/**
+ * 단일 테이블 SELECT * 결과에서 관찰한 컬럼을 그 테이블에 귀속(learned).
+ * manual 컬럼은 보존하고, learned 컬럼은 관찰된 집합으로 교체한다(관찰 순서 유지).
+ */
+export function learnColumns(
+  hostId: string,
+  ref: MetadataRef,
+  columns: { name: string; type: string }[]
+): void {
+  if (!ref.catalog || !ref.schema || !ref.table || columns.length === 0) return
   const data = read()
   const host = (data.hosts[hostId] ??= { catalogs: {} })
-  applyRef(host, ref, 'manual', Date.now())
-  const leaf = nodeAt(host, ref)
-  if (leaf) leaf.source = 'manual'
+  const tbl = getOrCreateTable(host, ref, 'learned', Date.now())
+  if (!tbl) return
+  const manualCols = (tbl.columns ?? []).filter((c) => c.source === 'manual')
+  const observed = new Set(columns.map((c) => c.name.toLowerCase()))
+  // 관찰 순서대로: 같은 이름의 manual 컬럼이 있으면 그걸 유지, 없으면 learned로
+  const merged: ColumnNode[] = columns.map((c) => {
+    const m = manualCols.find((x) => x.name.toLowerCase() === c.name.toLowerCase())
+    return m ?? { name: c.name, type: c.type, source: 'learned' }
+  })
+  // 관찰되지 않은 manual 컬럼은 뒤에 유지
+  for (const m of manualCols) if (!observed.has(m.name.toLowerCase())) merged.push(m)
+  tbl.columns = merged
+  write(data)
+}
+
+/** 사용자가 직접 추가/수정한 항목(manual). column이 있으면 수동 컬럼, 아니면 노드를 manual로 보호 승격. */
+export function upsertManual(input: ManualUpsertInput): HostMetadata {
+  const { hostId, catalog, schema, table, column, columnType } = input
+  if (!catalog) return getHostMetadata(hostId)
+  const data = read()
+  const host = (data.hosts[hostId] ??= { catalogs: {} })
+  const now = Date.now()
+
+  if (column && schema && table) {
+    // 수동 컬럼 추가/수정(테이블 경로 확보 후 컬럼 upsert)
+    const tbl = getOrCreateTable(host, { catalog, schema, table }, 'manual', now)
+    if (tbl) {
+      const cols = tbl.columns ?? []
+      const node: ColumnNode = { name: column, type: columnType ?? '', source: 'manual' }
+      const idx = cols.findIndex((c) => c.name.toLowerCase() === column.toLowerCase())
+      if (idx >= 0) cols[idx] = node
+      else cols.push(node)
+      tbl.columns = cols
+    }
+  } else {
+    const ref: MetadataRef = { catalog, schema, table }
+    applyRef(host, ref, 'manual', now)
+    const leaf = nodeAt(host, ref)
+    if (leaf) leaf.source = 'manual'
+  }
   write(data)
   return host
 }
 
-/** 특정 노드 삭제(하위 연쇄삭제). */
+/** 특정 노드 삭제(하위 연쇄삭제). column이 있으면 그 컬럼만 삭제. */
 export function deleteNode(input: DeleteNodeInput): HostMetadata {
-  const { hostId, catalog, schema, table } = input
+  const { hostId, catalog, schema, table, column } = input
   const data = read()
   const host = data.hosts[hostId]
   if (!host) return { catalogs: {} }
@@ -139,7 +195,13 @@ export function deleteNode(input: DeleteNodeInput): HostMetadata {
       const sch = cat.schemas[schema]
       if (sch) {
         if (!table) delete cat.schemas[schema]
-        else delete sch.tables[table]
+        else if (column) {
+          const tbl = sch.tables[table]
+          if (tbl?.columns) {
+            tbl.columns = tbl.columns.filter((c) => c.name.toLowerCase() !== column.toLowerCase())
+            if (tbl.columns.length === 0) delete tbl.columns
+          }
+        } else delete sch.tables[table]
       }
     }
   }
@@ -155,7 +217,14 @@ export function clearLearned(hostId: string): HostMetadata {
   for (const [catName, cat] of Object.entries(host.catalogs)) {
     for (const [schName, sch] of Object.entries(cat.schemas)) {
       for (const [tblName, tbl] of Object.entries(sch.tables)) {
-        if (tbl.source === 'learned') delete sch.tables[tblName]
+        const manualCols = (tbl.columns ?? []).filter((c) => c.source === 'manual')
+        // learned 테이블이고 manual 컬럼도 없으면 통째로 제거
+        if (tbl.source === 'learned' && manualCols.length === 0) {
+          delete sch.tables[tblName]
+          continue
+        }
+        // 보존 대상: learned 컬럼만 벗겨내고 manual 컬럼은 남긴다
+        tbl.columns = manualCols.length ? manualCols : undefined
       }
       if (sch.source === 'learned' && Object.keys(sch.tables).length === 0) delete cat.schemas[schName]
     }

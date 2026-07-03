@@ -27,7 +27,7 @@ import {
   updateQuery
 } from './store/savedQueries'
 import { getSettings, updateSettings } from './store/settings'
-import { learnMetadataFromSql } from './learnMetadata'
+import { learnColumnsFromResult, learnMetadataFromSql } from './learnMetadata'
 import {
   clearAll as clearAllMetadata,
   clearLearned as clearLearnedMetadata,
@@ -159,6 +159,8 @@ export function registerIpcHandlers(): void {
           })
           // 성공 쿼리에서 catalog/schema/table 학습(best-effort, 실패해도 응답 무영향)
           learnMetadataFromSql(req.hostId, req.sql, stored.catalog, stored.schema)
+          // 단일 테이블 SELECT * 면 결과 컬럼을 그 테이블에 귀속 학습
+          learnColumnsFromResult(req.hostId, req.sql, value.columns, stored.catalog, stored.schema)
         }
         return { ok: true, value }
       } catch (e) {
