@@ -4,6 +4,7 @@ import type {
   HostConfig,
   HostInput,
   HostMetadata,
+  MetadataRef,
   QueryFolder,
   SavedLibrary,
   SavedQuery
@@ -12,6 +13,7 @@ import { ActivityRail, type ExplorerSection } from './components/ActivityRail'
 import { HostList } from './components/HostList'
 import { HistoryList } from './components/HistoryList'
 import { SavedPanel } from './components/SavedPanel'
+import { MetadataPanel } from './components/MetadataPanel'
 import { HostDialog } from './components/HostDialog'
 import { SqlEditor } from './components/SqlEditor'
 import { ResultsPane } from './components/ResultsPane'
@@ -20,7 +22,7 @@ import { SaveQueryDialog, type SaveQueryResult } from './components/SaveQueryDia
 import { PromptDialog } from './components/PromptDialog'
 import { CloseTabDialog } from './components/CloseTabDialog'
 import { ConfirmDialog, type ConfirmConfig } from './components/ConfirmDialog'
-import { IconChevronLeft, IconPlus, IconTrash } from './components/icons'
+import { IconChevronLeft, IconPlus, IconRefresh, IconTrash } from './components/icons'
 import {
   type EditorTab,
   type Pane,
@@ -71,6 +73,8 @@ export default function App(): JSX.Element {
   const [rowLimit, setRowLimit] = useState<number | null>(300)
   // host별 학습된 메타데이터 캐시(자동완성/관리 섹션 공용). 지연 로드.
   const [metadata, setMetadata] = useState<Record<string, HostMetadata>>({})
+  // 관리 섹션이 보여줄 host(미선택이면 활성 탭 host를 따른다)
+  const [metaHostId, setMetaHostId] = useState<string | null>(null)
 
   // ----- 멀티 탭 / 분할 pane -----
   // panes.length===1 이면 단일 화면, 2 이면 세로 분할(#3~). focusedPane = 마지막으로 만진 창.
@@ -609,6 +613,68 @@ export default function App(): JSX.Element {
     if (activeHostId && metadata[activeHostId] === undefined) void refreshMetadata(activeHostId)
   }, [activeHostId, metadata, refreshMetadata])
 
+  // ----- 메타데이터 관리(섹션) -----
+  const metaPanelHostId = metaHostId ?? activeHostId
+  const applyMeta = (hostId: string, p: Promise<HostMetadata>): void => {
+    void p.then((m) => setMetadata((cur) => ({ ...cur, [hostId]: m })))
+  }
+  const selectMetaHost = (id: string): void => {
+    setMetaHostId(id)
+    if (metadata[id] === undefined) void refreshMetadata(id)
+  }
+  const promptAddCatalog = (): void => {
+    const h = metaPanelHostId
+    if (!h) return
+    setPromptState({
+      title: '카탈로그 추가 (수동)',
+      placeholder: '카탈로그 이름',
+      onSubmit: (name) => applyMeta(h, api.upsertMetadata({ hostId: h, catalog: name }))
+    })
+  }
+  const promptAddSchema = (catalog: string): void => {
+    const h = metaPanelHostId
+    if (!h) return
+    setPromptState({
+      title: `스키마 추가 · ${catalog}`,
+      placeholder: '스키마 이름',
+      onSubmit: (name) => applyMeta(h, api.upsertMetadata({ hostId: h, catalog, schema: name }))
+    })
+  }
+  const promptAddTable = (catalog: string, schema: string): void => {
+    const h = metaPanelHostId
+    if (!h) return
+    setPromptState({
+      title: `테이블 추가 · ${catalog}.${schema}`,
+      placeholder: '테이블 이름',
+      onSubmit: (name) => applyMeta(h, api.upsertMetadata({ hostId: h, catalog, schema, table: name }))
+    })
+  }
+  const deleteMeta = (ref: MetadataRef, label: string): void => {
+    const h = metaPanelHostId
+    if (!h) return
+    askConfirm({
+      title: `'${label}' 삭제`,
+      message: '다시 성공 쿼리에 등장하면 재학습됩니다.',
+      confirmLabel: '삭제',
+      danger: true,
+      onConfirm: () => applyMeta(h, api.deleteMetadata({ hostId: h, ...ref }))
+    })
+  }
+  const clearLearnedMeta = (): void => {
+    const h = metaPanelHostId
+    if (!h) return
+    askConfirm({
+      title: '학습 데이터 초기화',
+      message: '이 연결의 학습된 메타데이터를 모두 지웁니다. 수동 추가 항목은 유지됩니다.',
+      confirmLabel: '초기화',
+      danger: true,
+      onConfirm: () => {
+        applyMeta(h, api.clearLearnedMetadata(h))
+        setToast('학습 데이터를 초기화했습니다.')
+      }
+    })
+  }
+
   // 사이드바 크기/접힘 상태 영속화(localStorage)
   useEffect(() => {
     localStorage.setItem('explorerWidth', String(explorerWidth))
@@ -674,6 +740,40 @@ export default function App(): JSX.Element {
           <div className="explorer-actions">
             <button className="icon-btn" title="새 폴더" onClick={createFolder}>
               <IconPlus size={15} />
+            </button>
+            {collapseBtn}
+          </div>
+        </div>
+      )
+    }
+    if (section === 'metadata') {
+      return (
+        <div className="explorer-header">
+          <span className="explorer-title">Metadata</span>
+          <div className="explorer-actions">
+            <button
+              className="icon-btn"
+              title="카탈로그 추가 (수동)"
+              disabled={!metaPanelHostId}
+              onClick={promptAddCatalog}
+            >
+              <IconPlus size={15} />
+            </button>
+            <button
+              className="icon-btn"
+              title="새로고침"
+              disabled={!metaPanelHostId}
+              onClick={() => metaPanelHostId && void refreshMetadata(metaPanelHostId)}
+            >
+              <IconRefresh size={15} />
+            </button>
+            <button
+              className="icon-btn"
+              title="학습 데이터 초기화"
+              disabled={!metaPanelHostId}
+              onClick={clearLearnedMeta}
+            >
+              <IconTrash size={15} />
             </button>
             {collapseBtn}
           </div>
@@ -780,6 +880,17 @@ export default function App(): JSX.Element {
               onLoad={loadHistory}
               onRun={runHistory}
               onDelete={deleteHistory}
+            />
+          )}
+          {section === 'metadata' && (
+            <MetadataPanel
+              hosts={hosts}
+              hostId={metaPanelHostId}
+              metadata={metaPanelHostId ? metadata[metaPanelHostId] ?? null : null}
+              onSelectHost={selectMetaHost}
+              onAddSchema={promptAddSchema}
+              onAddTable={promptAddTable}
+              onDelete={deleteMeta}
             />
           )}
         </aside>

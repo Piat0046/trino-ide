@@ -1882,3 +1882,68 @@ body.col-resizing * {
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+/* ===== 메타데이터 패널 (catalog/schema/table 트리) ===== */
+.meta-hostbar {
+  padding: 8px 10px 6px;
+  border-bottom: 1px solid var(--border);
+}
+.meta-select {
+  width: 100%;
+  background: var(--bg-3);
+  color: var(--text-0);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  padding: 5px 8px;
+  font-family: var(--sans);
+  font-size: 12px;
+}
+.meta-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  color: var(--text-2);
+  border-bottom: 1px solid var(--border);
+}
+.meta-search input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-0);
+  font-family: var(--sans);
+  font-size: 12px;
+}
+.meta-icon {
+  color: var(--meta);
+  font-size: 11px;
+  width: 14px;
+  text-align: center;
+  flex: none;
+}
+.meta-icon.manual {
+  color: var(--warn);
+}
+.meta-badge {
+  font-size: 10px;
+  color: var(--warn);
+  background: var(--warn-dim);
+  border-radius: 999px;
+  padding: 0 6px;
+  line-height: 15px;
+  flex: none;
+}
+.meta-freq {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-2);
+  flex: none;
+}
+.meta-sub > .folder-row {
+  padding-left: 20px;
+}
+.meta-leaf {
+  padding-left: 38px;
+}
