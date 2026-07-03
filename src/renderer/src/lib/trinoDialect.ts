@@ -167,16 +167,15 @@ function chainBeforeDot(ctx: CompletionContext, from: number): string[] | null {
 /** getMeta 클로저를 캡처한 완성 소스를 만든다. */
 function makeCompletionSource(getMeta: GetMeta) {
   return (ctx: CompletionContext): CompletionResult | null => {
-    const word = ctx.matchBefore(/[\w]+/)
-    if ((!word || word.from === word.to) && !ctx.explicit) return null
-
     const node = syntaxTree(ctx.state).resolveInner(ctx.pos, -1)
     if (SKIP_NODE.test(node.name)) return null
 
+    const word = ctx.matchBefore(/[\w]+/)
     const from = word ? word.from : ctx.pos
     const { meta } = getMeta()
 
-    // catalog.schema.table 의 '.' 뒤: 메타데이터 드릴다운(정적 키워드 억제)
+    // 1) catalog.schema.table 드릴다운: '.' 뒤에서는 입력 단어가 없어도 즉시 완성
+    //    (이 분기를 no-word 가드보다 먼저 둬야 `hive.` / `hive.sales.` 에서 바로 목록이 뜬다)
     if (from > 0 && ctx.state.sliceDoc(from - 1, from) === '.') {
       if (!meta) return null
       const segs = chainBeforeDot(ctx, from)
@@ -185,15 +184,24 @@ function makeCompletionSource(getMeta: GetMeta) {
       return opts && opts.length ? { from, options: opts, validFor: /^[\w]*$/ } : null
     }
 
-    // FROM/JOIN 직후: 메타데이터 후보를 정적 완성보다 위에 얹는다
+    // 2) FROM/JOIN 직후: 카탈로그 + 완전수식 테이블을 정적 완성 위에 얹는다
     const inFrom = !!ctx.matchBefore(/\b(from|join)\s+[\w".]*$/i)
     const metaOpts = inFrom && meta ? fromContextOptions(meta) : []
 
+    const hasWord = !!word && word.from !== word.to
+    // 단어도, 명시 호출(⌃Space)도, FROM/JOIN 메타 후보도 없으면 완성하지 않는다
+    if (!hasWord && !ctx.explicit && metaOpts.length === 0) return null
+
+    const includeStatic = hasWord || ctx.explicit
     const typed = word ? word.text : ''
     // 함수는 2글자 이상 입력했을 때만(1글자에 330개 함수가 쏟아지는 소음 방지). 명시 호출(⌃Space)은 전부.
-    const staticOpts = typed.length >= 2 || ctx.explicit ? ALL_OPTS : KEYWORDS_AND_TYPES
-    const options = metaOpts.length ? [...metaOpts, ...staticOpts] : staticOpts
-    return { from, options }
+    const staticOpts = includeStatic
+      ? typed.length >= 2 || ctx.explicit
+        ? ALL_OPTS
+        : KEYWORDS_AND_TYPES
+      : []
+    const options = [...metaOpts, ...staticOpts]
+    return options.length ? { from, options } : null
   }
 }
 
