@@ -59,7 +59,11 @@ export const cmTheme = EditorView.theme(
     // 카테고리별 색: 함수=틸(동사), 타입=데이터타입색, 키워드=조용한 회색
     '.cm-completionIcon-function::after': { color: 'var(--accent)' },
     '.cm-completionIcon-type::after': { color: 'var(--t-time)' },
-    '.cm-completionIcon-keyword::after': { color: 'var(--text-2)' }
+    '.cm-completionIcon-keyword::after': { color: 'var(--text-2)' },
+    // 학습된 메타데이터(catalog/schema/table): 단일 --meta 색 + 레벨별 글리프(base 테마에 없어 content 직접 지정)
+    '.cm-completionIcon-catalog::after': { content: '"▤"', color: 'var(--meta)' },
+    '.cm-completionIcon-schema::after': { content: '"◇"', color: 'var(--meta)' },
+    '.cm-completionIcon-table::after': { content: '"▦"', color: 'var(--meta)' }
   },
   { dark: true }
 )

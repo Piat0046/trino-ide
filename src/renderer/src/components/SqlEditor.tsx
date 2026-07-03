@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import CodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror'
 import { autocompletion } from '@codemirror/autocomplete'
-import type { HostConfig } from '@shared/types'
+import type { HostConfig, HostMetadata } from '@shared/types'
 import { cmTheme } from '../lib/cmTheme'
 import { activeStatement } from '../lib/cmActiveStatement'
-import { trino } from '../lib/trinoDialect'
+import { makeTrino, type CompletionMeta } from '../lib/trinoDialect'
 import { statementAtCursor } from '../lib/sqlStatements'
 import { formatSql } from '../lib/formatSql'
 import { IconFormat, IconPlay, IconSave, IconStop } from './icons'
@@ -31,6 +31,8 @@ interface Props {
   hosts: HostConfig[]
   hostId: string | null
   onSelectHost: (id: string) => void
+  /** 활성 host의 학습된 메타데이터(자동완성 소스가 읽음) */
+  metadata: HostMetadata | null
   // LIMIT (전역)
   rowLimit: number | null
   onRowLimitChange: (limit: number | null) => void
@@ -58,12 +60,21 @@ export function SqlEditor({
   hosts,
   hostId,
   onSelectHost,
+  metadata,
   rowLimit,
   onRowLimitChange,
   split,
   onToggleSplit
 }: Props): JSX.Element {
   const cmRef = useRef<ReactCodeMirrorRef>(null)
+
+  // 자동완성 소스가 매 호출 읽는 현재 host 메타데이터(ref만 갱신, 확장 인스턴스는 고정 → reconfigure churn 방지)
+  const metaRef = useRef<CompletionMeta>({ meta: null })
+  useEffect(() => {
+    const host = hosts.find((h) => h.id === hostId)
+    metaRef.current = { meta: metadata, defCatalog: host?.catalog, defSchema: host?.schema }
+  }, [metadata, hostId, hosts])
+  const trinoSupport = useMemo(() => makeTrino(() => metaRef.current), [])
   const unlimited = rowLimit === null
   const [limitText, setLimitText] = useState(unlimited ? String(FALLBACK_LIMIT) : String(rowLimit))
 
@@ -219,7 +230,7 @@ export function SqlEditor({
           height="100%"
           theme="dark"
           extensions={[
-            trino,
+            trinoSupport,
             cmTheme,
             activeStatement,
             autocompletion({ activateOnTyping: true, selectOnOpen: false })

@@ -22,6 +22,9 @@
   --danger-dim: rgba(255, 107, 107, 0.12);
   --warn: #e3a857;
   --warn-dim: rgba(227, 168, 87, 0.12);
+  /* 메타데이터(catalog/schema/table) 계열 — 뮤트 인디고(틸/퍼플/앰버와 충돌 없음) */
+  --meta: #7c83e0;
+  --meta-dim: rgba(124, 131, 224, 0.14);
 
   /* 데이터 타입 라벨 색(절제) */
   --t-num: #74d3c4;
