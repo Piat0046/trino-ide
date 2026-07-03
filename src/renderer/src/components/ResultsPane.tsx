@@ -36,6 +36,8 @@ const HEAD_H = 42
 const ROW_H = 30
 const CHAR_W = 7.3
 const ROWNUM_W = 66
+// 컬럼 찾기 가로 스크롤 지속시간(ms). 값을 키우면 느리게, 0이면 즉시 점프.
+const SCROLL_MS = 160
 const MIN_COL = 84
 const MAX_COL = 460
 
@@ -145,6 +147,7 @@ export function ResultsPane({
   const [find, setFind] = useState('')
   const [matchIdx, setMatchIdx] = useState(0)
   const findRef = useRef<HTMLInputElement>(null)
+  const scrollAnimRef = useRef<number | null>(null)
   const dragColRef = useRef<number | null>(null)
   const menuWrapRef = useRef<HTMLDivElement>(null)
   const exportWrapRef = useRef<HTMLDivElement>(null)
@@ -156,8 +159,17 @@ export function ResultsPane({
   }, [result, error])
 
   useEffect(() => {
+    if (scrollAnimRef.current != null) cancelAnimationFrame(scrollAnimRef.current)
     parentRef.current?.scrollTo(0, 0)
   }, [result])
+
+  // 언마운트 시 진행 중 스크롤 애니메이션 정리
+  useEffect(
+    () => () => {
+      if (scrollAnimRef.current != null) cancelAnimationFrame(scrollAnimRef.current)
+    },
+    []
+  )
 
   // 복사됨 토스트 자동 소멸
   useEffect(() => {
@@ -227,11 +239,29 @@ export function ResultsPane({
     : []
   const curMatch = matches.length ? Math.min(matchIdx, matches.length - 1) : 0
   const hitOrigIndex = matches.length ? matches[curMatch] : null
+  // 네이티브 smooth는 속도가 브라우저 고정이라, 지정 지속시간·이징으로 직접 애니메이션
+  const scrollLeftTo = (el: HTMLElement, to: number, ms: number): void => {
+    if (scrollAnimRef.current != null) cancelAnimationFrame(scrollAnimRef.current)
+    const from = el.scrollLeft
+    const dist = to - from
+    if (ms <= 0 || Math.abs(dist) < 1) {
+      el.scrollLeft = to
+      return
+    }
+    const start = performance.now()
+    const ease = (t: number): number => 1 - Math.pow(1 - t, 3) // easeOutCubic
+    const step = (now: number): void => {
+      const t = Math.min(1, (now - start) / ms)
+      el.scrollLeft = from + dist * ease(t)
+      scrollAnimRef.current = t < 1 ? requestAnimationFrame(step) : null
+    }
+    scrollAnimRef.current = requestAnimationFrame(step)
+  }
   const scrollToCol = (origIndex: number): void => {
     const cell = parentRef.current?.querySelector(`.g-hcell[data-col="${origIndex}"]`)
     if (cell instanceof HTMLElement && parentRef.current) {
       // 행번호가 sticky-left라 ROWNUM_W만큼 당겨 컬럼이 그 뒤에 붙게
-      parentRef.current.scrollTo({ left: Math.max(0, cell.offsetLeft - ROWNUM_W), behavior: 'smooth' })
+      scrollLeftTo(parentRef.current, Math.max(0, cell.offsetLeft - ROWNUM_W), SCROLL_MS)
     }
   }
   const goMatch = (delta: number): void => {
