@@ -256,6 +256,11 @@ export interface ManualUpsertInput extends MetadataRef {
 export interface DeleteNodeInput extends MetadataRef {
   hostId: string
 }
+/** 노드 이름 변경 입력. 대상 노드는 manual로 승격된다(사용자가 손댄 항목 보호). */
+export interface RenameNodeInput extends MetadataRef {
+  hostId: string
+  newName: string
+}
 
 /** preload가 contextBridge로 노출하는 window.api의 형태 */
 export interface TrinoIdeApi {
@@ -286,6 +291,7 @@ export interface TrinoIdeApi {
   /** ── 메타데이터 자동완성 ── host별 catalog/schema/table 조회·수정 */
   getMetadata(hostId: string): Promise<HostMetadata>
   upsertMetadata(input: ManualUpsertInput): Promise<HostMetadata>
+  renameMetadata(input: RenameNodeInput): Promise<HostMetadata>
   deleteMetadata(input: DeleteNodeInput): Promise<HostMetadata>
   clearLearnedMetadata(hostId: string): Promise<HostMetadata>
   clearAllMetadata(hostId: string): Promise<void>

@@ -10,6 +10,7 @@ import type {
   MetaNode,
   MetadataRef,
   MetadataSource,
+  RenameNodeInput,
   SchemaNode,
   TableNode
 } from '@shared/types'
@@ -211,6 +212,51 @@ export function upsertManual(input: ManualUpsertInput): HostMetadata {
     applyRef(host, ref, 'manual', now)
     const leaf = nodeAt(host, ref)
     if (leaf) leaf.source = 'manual'
+  }
+  write(data)
+  return host
+}
+
+/** rec의 oldKey를 newKey로 옮긴다(newKey가 이미 있거나 same이면 이동하지 않음). */
+function renameKey<T>(rec: Record<string, T>, oldKey: string, newKey: string): void {
+  if (oldKey === newKey || rec[newKey] || !rec[oldKey]) return
+  rec[newKey] = rec[oldKey]
+  delete rec[oldKey]
+}
+
+/** 노드 이름 변경 + manual 승격(사용자가 손댄 항목 보호). 형제에 같은 이름이 있으면 이동은 생략. */
+export function renameNode(input: RenameNodeInput): HostMetadata {
+  const { hostId, catalog, schema, table, column, newName } = input
+  const data = read()
+  const host = data.hosts[hostId]
+  if (!host || !newName) return host ?? { catalogs: {} }
+  const cat = host.catalogs[catalog]
+  if (!cat) return host
+
+  if (!schema) {
+    renameKey(host.catalogs, catalog, newName)
+    cat.source = 'manual'
+  } else {
+    const sch = cat.schemas[schema]
+    if (!sch) return host
+    if (!table) {
+      renameKey(cat.schemas, schema, newName)
+      sch.source = 'manual'
+    } else {
+      const tbl = sch.tables[table]
+      if (!tbl) return host
+      if (!column) {
+        renameKey(sch.tables, table, newName)
+        tbl.source = 'manual'
+      } else {
+        const cols = tbl.columns ?? []
+        const idx = cols.findIndex((c) => c.name.toLowerCase() === column.toLowerCase())
+        const dup = cols.some(
+          (c, i) => i !== idx && c.name.toLowerCase() === newName.toLowerCase()
+        )
+        if (idx >= 0 && !dup) cols[idx] = { ...cols[idx], name: newName, source: 'manual' }
+      }
+    }
   }
   write(data)
   return host

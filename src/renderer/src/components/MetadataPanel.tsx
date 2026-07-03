@@ -1,6 +1,13 @@
 import { useState } from 'react'
 import type { HostConfig, HostMetadata, MetadataRef } from '@shared/types'
-import { IconChevronDown, IconChevronRight, IconPlus, IconSearch, IconTrash } from './icons'
+import {
+  IconChevronDown,
+  IconChevronRight,
+  IconPencil,
+  IconPlus,
+  IconSearch,
+  IconTrash
+} from './icons'
 
 interface Props {
   hosts: HostConfig[]
@@ -10,7 +17,15 @@ interface Props {
   onSelectHost: (id: string) => void
   onAddSchema: (catalog: string) => void
   onAddTable: (catalog: string, schema: string) => void
-  onAddColumn: (catalog: string, schema: string, table: string) => void
+  /** 컬럼 추가(existing 없음) 또는 편집(existing 있음) */
+  onColumnEdit: (
+    catalog: string,
+    schema: string,
+    table: string,
+    existing?: { name: string; type: string }
+  ) => void
+  /** catalog/schema/table 이름 변경(→ manual 승격) */
+  onRename: (ref: MetadataRef, currentName: string) => void
   onDelete: (ref: MetadataRef, label: string) => void
 }
 
@@ -25,7 +40,8 @@ export function MetadataPanel({
   onSelectHost,
   onAddSchema,
   onAddTable,
-  onAddColumn,
+  onColumnEdit,
+  onRename,
   onDelete
 }: Props): JSX.Element {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
@@ -121,6 +137,15 @@ export function MetadataPanel({
                     <IconPlus size={12} />
                   </button>
                   <button
+                    title="이름 변경"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onRename({ catalog: catName }, catName)
+                    }}
+                  >
+                    <IconPencil size={12} />
+                  </button>
+                  <button
                     title="삭제"
                     onClick={(e) => {
                       e.stopPropagation()
@@ -165,6 +190,15 @@ export function MetadataPanel({
                               }}
                             >
                               <IconPlus size={12} />
+                            </button>
+                            <button
+                              title="이름 변경"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                onRename({ catalog: catName, schema: schName }, schName)
+                              }}
+                            >
+                              <IconPencil size={12} />
                             </button>
                             <button
                               title="삭제"
@@ -225,10 +259,22 @@ export function MetadataPanel({
                                           title="컬럼 추가(수동)"
                                           onClick={(e) => {
                                             e.stopPropagation()
-                                            onAddColumn(catName, schName, tblName)
+                                            onColumnEdit(catName, schName, tblName)
                                           }}
                                         >
                                           <IconPlus size={12} />
+                                        </button>
+                                        <button
+                                          title="이름 변경"
+                                          onClick={(e) => {
+                                            e.stopPropagation()
+                                            onRename(
+                                              { catalog: catName, schema: schName, table: tblName },
+                                              tblName
+                                            )
+                                          }}
+                                        >
+                                          <IconPencil size={12} />
                                         </button>
                                         <button
                                           title="삭제"
@@ -267,6 +313,18 @@ export function MetadataPanel({
                                                 <span className="meta-badge">수동</span>
                                               )}
                                               <div className="row-actions">
+                                                <button
+                                                  title="편집"
+                                                  onClick={(e) => {
+                                                    e.stopPropagation()
+                                                    onColumnEdit(catName, schName, tblName, {
+                                                      name: c.name,
+                                                      type: c.type
+                                                    })
+                                                  }}
+                                                >
+                                                  <IconPencil size={12} />
+                                                </button>
                                                 <button
                                                   title="삭제"
                                                   onClick={(e) => {

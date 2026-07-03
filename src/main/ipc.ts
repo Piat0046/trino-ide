@@ -13,6 +13,7 @@ import type {
   CreateQueryInput,
   DeleteNodeInput,
   ManualUpsertInput,
+  RenameNodeInput,
   UpdateQueryInput
 } from '@shared/types'
 import { decryptPassword, deleteHost, getStoredHost, listHosts, saveHost } from './store/hosts'
@@ -33,6 +34,7 @@ import {
   clearLearned as clearLearnedMetadata,
   deleteNode as deleteMetadataNode,
   getHostMetadata,
+  renameNode as renameMetadataNode,
   upsertManual
 } from './store/metadata'
 import {
@@ -220,6 +222,7 @@ export function registerIpcHandlers(): void {
   // ----- metadata -----
   ipcMain.handle('metadata:get', (_e, hostId: string) => getHostMetadata(hostId))
   ipcMain.handle('metadata:upsert', (_e, input: ManualUpsertInput) => upsertManual(input))
+  ipcMain.handle('metadata:rename', (_e, input: RenameNodeInput) => renameMetadataNode(input))
   ipcMain.handle('metadata:delete', (_e, input: DeleteNodeInput) => deleteMetadataNode(input))
   ipcMain.handle('metadata:clearLearned', (_e, hostId: string) => clearLearnedMetadata(hostId))
   ipcMain.handle('metadata:clearAll', (_e, hostId: string) => clearAllMetadata(hostId))
