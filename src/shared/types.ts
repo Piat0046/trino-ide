@@ -272,6 +272,12 @@ export interface TrinoIdeApi {
   saveTextFile(input: SaveTextInput): Promise<SaveFileResult>
   /** 외부 브라우저로 URL 열기(http/https만). Trino Web UI(infoUri)용 */
   openExternal(url: string): Promise<void>
+  /** ── 메타데이터 자동완성 ── host별 catalog/schema/table 조회·수정 */
+  getMetadata(hostId: string): Promise<HostMetadata>
+  upsertMetadata(input: ManualUpsertInput): Promise<HostMetadata>
+  deleteMetadata(input: DeleteNodeInput): Promise<HostMetadata>
+  clearLearnedMetadata(hostId: string): Promise<HostMetadata>
+  clearAllMetadata(hostId: string): Promise<void>
   /** 실행 진행 상황 이벤트 구독. 반환값 호출로 구독 해제. */
   onQueryProgress(cb: (progress: QueryProgress) => void): () => void
 }
