@@ -21,6 +21,7 @@ import {
   updateQuery
 } from './store/savedQueries'
 import { getSettings, updateSettings } from './store/settings'
+import { learnMetadataFromSql } from './learnMetadata'
 import {
   type CancelToken,
   type ResolvedConn,
@@ -143,6 +144,8 @@ export function registerIpcHandlers(): void {
             rowCount: value.rowCount,
             elapsedMs: value.stats?.elapsedMs
           })
+          // 성공 쿼리에서 catalog/schema/table 학습(best-effort, 실패해도 응답 무영향)
+          learnMetadataFromSql(req.hostId, req.sql, stored.catalog, stored.schema)
         }
         return { ok: true, value }
       } catch (e) {
