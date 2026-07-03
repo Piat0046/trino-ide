@@ -258,11 +258,14 @@ export function ResultsPane({
     scrollAnimRef.current = requestAnimationFrame(step)
   }
   const scrollToCol = (origIndex: number): void => {
-    const cell = parentRef.current?.querySelector(`.g-hcell[data-col="${origIndex}"]`)
-    if (cell instanceof HTMLElement && parentRef.current) {
-      // 행번호가 sticky-left라 ROWNUM_W만큼 당겨 컬럼이 그 뒤에 붙게
-      scrollLeftTo(parentRef.current, Math.max(0, cell.offsetLeft - ROWNUM_W), SCROLL_MS)
-    }
+    const wrap = parentRef.current
+    const cell = wrap?.querySelector(`.g-hcell[data-col="${origIndex}"]`)
+    if (!(cell instanceof HTMLElement) || !wrap) return
+    // 컬럼 중앙이 뷰포트 중앙에 오도록 스크롤. 단 스크롤 범위를 벗어나면 클램프해서
+    // 앞쪽 컬럼(중앙 두면 왼쪽 여백)은 0=왼쪽 그대로, 뒤쪽 컬럼은 max=오른쪽 그대로 둔다.
+    const center = cell.offsetLeft + cell.offsetWidth / 2 - wrap.clientWidth / 2
+    const max = wrap.scrollWidth - wrap.clientWidth
+    scrollLeftTo(wrap, Math.max(0, Math.min(center, max)), SCROLL_MS)
   }
   const goMatch = (delta: number): void => {
     if (!matches.length) return
