@@ -201,6 +201,51 @@ export type IpcResult<T> =
   | { ok: true; value: T }
   | { ok: false; error: string; errorInfo?: QueryErrorInfo }
 
+/** ── 성공 쿼리 기반 메타데이터 자동완성 ──
+ * host별로 성공 쿼리에서 관찰(learned)했거나 사용자가 직접 추가(manual)한
+ * catalog → schema → table 계층. Trino에 별도 호출하지 않고 로컬에 축적한다. */
+export type MetadataSource = 'learned' | 'manual'
+
+/** 계층 노드의 공통 메타. count/lastSeen은 자동완성 정렬 신호로 쓴다. */
+export interface MetaNode {
+  source: MetadataSource
+  /** 최초 관찰/등록 시각(epoch ms) */
+  firstSeen: number
+  /** 최근 관찰/등록 시각(epoch ms) */
+  lastSeen: number
+  /** learned 관찰 횟수(manual은 0으로 시작·유지) */
+  count: number
+}
+
+/** Phase 2에서 columns를 붙일 자리 */
+export type TableNode = MetaNode
+export interface SchemaNode extends MetaNode {
+  tables: Record<string, TableNode>
+}
+export interface CatalogNode extends MetaNode {
+  schemas: Record<string, SchemaNode>
+}
+
+/** 한 host의 메타데이터 트리(키 = 객체 이름, 원본 케이스 보존) */
+export interface HostMetadata {
+  catalogs: Record<string, CatalogNode>
+}
+
+/** catalog는 항상 존재, schema/table은 계층 깊이에 따라 선택. */
+export interface MetadataRef {
+  catalog: string
+  schema?: string
+  table?: string
+}
+/** 수동 추가/수정 입력 */
+export interface ManualUpsertInput extends MetadataRef {
+  hostId: string
+}
+/** 노드 삭제 입력(하위 연쇄삭제) */
+export interface DeleteNodeInput extends MetadataRef {
+  hostId: string
+}
+
 /** preload가 contextBridge로 노출하는 window.api의 형태 */
 export interface TrinoIdeApi {
   listHosts(): Promise<HostConfig[]>
