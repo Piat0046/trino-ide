@@ -9,9 +9,9 @@ interface Props {
   onDelete: (id: string) => void
 }
 
-function firstLine(sql: string): string {
-  const line = sql.split('\n').find((l) => l.trim().length > 0) ?? sql
-  return line.trim()
+/** 미리보기: 줄바꿈·연속 공백을 단일 공백으로 평탄화해 한 줄로. (SELECT * 만 보이던 문제 해결) */
+function preview(sql: string): string {
+  return sql.replace(/\s+/g, ' ').trim()
 }
 
 function formatTime(ms: number): string {
@@ -40,7 +40,9 @@ export function HistoryList({ history, liveHostIds, onLoad, onRun, onDelete }: P
             >
               <div className="history-top">
                 <span className={'history-status ' + (h.ok ? 'ok' : 'fail')}>●</span>
-                <span className="history-sql">{firstLine(h.sql)}</span>
+                <span className="history-sql" title={h.sql}>
+                  {preview(h.sql)}
+                </span>
                 <div className="row-actions">
                   <button
                     onClick={(e) => {
