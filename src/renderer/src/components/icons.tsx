@@ -178,3 +178,30 @@ export const IconX = ({ size }: IconProps): JSX.Element =>
     </>,
     size
   )
+
+export const IconLayers = ({ size }: IconProps): JSX.Element =>
+  svg(
+    <>
+      <path d="M12 3l9 5-9 5-9-5 9-5z" />
+      <path d="M3 13l9 5 9-5" />
+    </>,
+    size
+  )
+
+export const IconPencil = ({ size }: IconProps): JSX.Element =>
+  svg(
+    <>
+      <path d="M4 20h4L18 10l-4-4L4 16v4z" />
+      <path d="M13 7l4 4" />
+    </>,
+    size
+  )
+
+export const IconRefresh = ({ size }: IconProps): JSX.Element =>
+  svg(
+    <>
+      <path d="M20 11a8 8 0 1 0-2.3 5.7" />
+      <path d="M20 4v6h-6" />
+    </>,
+    size
+  )
