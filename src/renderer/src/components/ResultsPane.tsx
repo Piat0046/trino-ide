@@ -15,6 +15,7 @@ import {
   IconCopy,
   IconDownload,
   IconEyeOff,
+  IconSearch,
   IconStop
 } from './icons'
 
@@ -140,6 +141,10 @@ export function ResultsPane({
   const [sort, setSort] = useState<SortState | null>(null)
   const [sel, setSel] = useState<CellSel | null>(null)
   const [flash, setFlash] = useState<string | null>(null)
+  // 컬럼 찾기: 이름 부분일치로 매칭 → 해당 컬럼으로 가로 스크롤(여러 개면 순회)
+  const [find, setFind] = useState('')
+  const [matchIdx, setMatchIdx] = useState(0)
+  const findRef = useRef<HTMLInputElement>(null)
   const dragColRef = useRef<number | null>(null)
   const menuWrapRef = useRef<HTMLDivElement>(null)
   const exportWrapRef = useRef<HTMLDivElement>(null)
@@ -203,6 +208,8 @@ export function ResultsPane({
     setColState({ sig: currentSig, cols })
     setSort(null)
     setSel(null)
+    setFind('')
+    setMatchIdx(0)
   } else {
     cols = colState.cols
   }
@@ -210,6 +217,32 @@ export function ResultsPane({
   const updateCols = (fn: (c: ColConfig[]) => ColConfig[]): void =>
     setColState((s) => ({ sig: s.sig, cols: fn(s.cols) }))
   const visibleCols = cols.filter((c) => c.visible)
+
+  // ----- 컬럼 찾기: 보이는 컬럼 이름 부분일치(대소문자 무시) -----
+  const findQ = find.trim().toLowerCase()
+  const matches = findQ
+    ? visibleCols
+        .map((c) => c.origIndex)
+        .filter((oi) => columns[oi].name.toLowerCase().includes(findQ))
+    : []
+  const curMatch = matches.length ? Math.min(matchIdx, matches.length - 1) : 0
+  const hitOrigIndex = matches.length ? matches[curMatch] : null
+  const scrollToCol = (origIndex: number): void => {
+    const cell = parentRef.current?.querySelector(`.g-hcell[data-col="${origIndex}"]`)
+    if (cell instanceof HTMLElement && parentRef.current) {
+      // 행번호가 sticky-left라 ROWNUM_W만큼 당겨 컬럼이 그 뒤에 붙게
+      parentRef.current.scrollTo({ left: Math.max(0, cell.offsetLeft - ROWNUM_W), behavior: 'smooth' })
+    }
+  }
+  const goMatch = (delta: number): void => {
+    if (!matches.length) return
+    setMatchIdx((curMatch + delta + matches.length) % matches.length)
+  }
+  // 현재 매칭이 바뀌면(타이핑/순회) 그 컬럼으로 스크롤
+  useEffect(() => {
+    if (hitOrigIndex != null) scrollToCol(hitOrigIndex)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hitOrigIndex])
 
   // ----- 클라이언트 정렬(현재 페이지 한정, 타입 인지) -----
   const displayRows = useMemo(() => {
@@ -343,6 +376,10 @@ export function ResultsPane({
     if ((e.metaKey || e.ctrlKey) && (e.key === 'c' || e.key === 'C') && sel) {
       e.preventDefault()
       copyCell(sel.row, sel.origIndex)
+    } else if ((e.metaKey || e.ctrlKey) && (e.key === 'f' || e.key === 'F')) {
+      e.preventDefault()
+      findRef.current?.focus()
+      findRef.current?.select()
     }
   }
 
@@ -379,6 +416,53 @@ export function ResultsPane({
 
         {result && tab === 'results' && (
           <>
+            <div className="col-find">
+              <IconSearch size={13} />
+              <input
+                ref={findRef}
+                className={'col-find-input' + (findQ && !matches.length ? ' no-match' : '')}
+                value={find}
+                placeholder="컬럼 찾기"
+                title="컬럼 이름으로 찾아 이동 (⌘F · Enter=다음 / ⇧Enter=이전)"
+                onChange={(e) => {
+                  setFind(e.target.value)
+                  setMatchIdx(0)
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    goMatch(e.shiftKey ? -1 : 1)
+                  } else if (e.key === 'Escape') {
+                    e.preventDefault()
+                    setFind('')
+                    e.currentTarget.blur()
+                  }
+                }}
+              />
+              {findQ && (
+                <>
+                  <span className="col-find-count">
+                    {matches.length ? `${curMatch + 1}/${matches.length}` : '없음'}
+                  </span>
+                  <button
+                    className="col-find-nav"
+                    title="이전 (⇧Enter)"
+                    disabled={matches.length < 2}
+                    onClick={() => goMatch(-1)}
+                  >
+                    <IconChevronLeft size={14} />
+                  </button>
+                  <button
+                    className="col-find-nav"
+                    title="다음 (Enter)"
+                    disabled={matches.length < 2}
+                    onClick={() => goMatch(1)}
+                  >
+                    <IconChevronRight size={14} />
+                  </button>
+                </>
+              )}
+            </div>
             {flash && <span className="copy-flash">✓ {flash}</span>}
             <span className="spacer" />
             <button className="cols-btn" onClick={copyAll} title="전체를 TSV로 클립보드 복사">
@@ -520,9 +604,12 @@ export function ResultsPane({
                         className={
                           'g-hcell' +
                           (dropTarget === c.origIndex ? ' drop-target' : '') +
-                          (sorted ? ' sorted' : '')
+                          (sorted ? ' sorted' : '') +
+                          (matches.includes(c.origIndex) ? ' col-match' : '') +
+                          (hitOrigIndex === c.origIndex ? ' col-hit' : '')
                         }
                         key={c.origIndex}
+                        data-col={c.origIndex}
                         title={`${col.name} · ${col.type} — 클릭: 정렬 / 우클릭: 메뉴`}
                         draggable
                         onClick={() => toggleSort(c.origIndex)}
