@@ -92,6 +92,38 @@ function nodeAt(host: HostMetadata, ref: MetadataRef): MetaNode | undefined {
   return sch.tables[ref.table]
 }
 
+/**
+ * host당 learned 테이블 수 상한. 초과하면 오래된(lastSeen 낮은) learned 테이블부터 정리한다.
+ * manual 테이블과 manual 컬럼을 가진 테이블은 항상 보호한다.
+ */
+const MAX_LEARNED_TABLES = 1500
+
+function pruneHost(host: HostMetadata): void {
+  const learned: { cat: string; sch: string; tbl: string; lastSeen: number }[] = []
+  for (const [catName, cat] of Object.entries(host.catalogs)) {
+    for (const [schName, sch] of Object.entries(cat.schemas)) {
+      for (const [tblName, tbl] of Object.entries(sch.tables)) {
+        const hasManualCol = (tbl.columns ?? []).some((c) => c.source === 'manual')
+        if (tbl.source === 'learned' && !hasManualCol) {
+          learned.push({ cat: catName, sch: schName, tbl: tblName, lastSeen: tbl.lastSeen })
+        }
+      }
+    }
+  }
+  if (learned.length <= MAX_LEARNED_TABLES) return
+  learned.sort((a, b) => a.lastSeen - b.lastSeen)
+  for (const e of learned.slice(0, learned.length - MAX_LEARNED_TABLES)) {
+    delete host.catalogs[e.cat].schemas[e.sch].tables[e.tbl]
+  }
+  // 비게 된 learned 스키마/카탈로그 정리(manual은 보존)
+  for (const [catName, cat] of Object.entries(host.catalogs)) {
+    for (const [schName, sch] of Object.entries(cat.schemas)) {
+      if (sch.source === 'learned' && Object.keys(sch.tables).length === 0) delete cat.schemas[schName]
+    }
+    if (cat.source === 'learned' && Object.keys(cat.schemas).length === 0) delete host.catalogs[catName]
+  }
+}
+
 /** cat/sch/tbl 경로를 생성/확보하고 그 테이블 노드를 반환. */
 function getOrCreateTable(
   host: HostMetadata,
@@ -123,6 +155,7 @@ export function learnReferences(hostId: string, refs: MetadataRef[]): void {
   const host = (data.hosts[hostId] ??= { catalogs: {} })
   const now = Date.now()
   for (const ref of valid) applyRef(host, ref, 'learned', now)
+  pruneHost(host)
   write(data)
 }
 
@@ -150,6 +183,7 @@ export function learnColumns(
   // 관찰되지 않은 manual 컬럼은 뒤에 유지
   for (const m of manualCols) if (!observed.has(m.name.toLowerCase())) merged.push(m)
   tbl.columns = merged
+  pruneHost(host)
   write(data)
 }
 
