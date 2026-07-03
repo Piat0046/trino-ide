@@ -14,6 +14,7 @@ import { HostList } from './components/HostList'
 import { HistoryList } from './components/HistoryList'
 import { SavedPanel } from './components/SavedPanel'
 import { MetadataPanel } from './components/MetadataPanel'
+import { ColumnEditDialog } from './components/ColumnEditDialog'
 import { HostDialog } from './components/HostDialog'
 import { SqlEditor } from './components/SqlEditor'
 import { ResultsPane } from './components/ResultsPane'
@@ -75,6 +76,14 @@ export default function App(): JSX.Element {
   const [metadata, setMetadata] = useState<Record<string, HostMetadata>>({})
   // 관리 섹션이 보여줄 host(미선택이면 활성 탭 host를 따른다)
   const [metaHostId, setMetaHostId] = useState<string | null>(null)
+  const [columnDialog, setColumnDialog] = useState<{
+    catalog: string
+    schema: string
+    table: string
+    name: string
+    type: string
+    editing: boolean
+  } | null>(null)
 
   // ----- 멀티 탭 / 분할 pane -----
   // panes.length===1 이면 단일 화면, 2 이면 세로 분할(#3~). focusedPane = 마지막으로 만진 창.
@@ -649,14 +658,47 @@ export default function App(): JSX.Element {
       onSubmit: (name) => applyMeta(h, api.upsertMetadata({ hostId: h, catalog, schema, table: name }))
     })
   }
-  const promptAddColumn = (catalog: string, schema: string, table: string): void => {
+  const openColumnEdit = (
+    catalog: string,
+    schema: string,
+    table: string,
+    existing?: { name: string; type: string }
+  ): void => {
+    if (!metaPanelHostId) return
+    setColumnDialog({
+      catalog,
+      schema,
+      table,
+      name: existing?.name ?? '',
+      type: existing?.type ?? '',
+      editing: !!existing
+    })
+  }
+  const submitColumn = (name: string, type: string): void => {
+    const h = metaPanelHostId
+    const d = columnDialog
+    setColumnDialog(null)
+    if (!h || !d) return
+    const upsert = (): Promise<HostMetadata> =>
+      api.upsertMetadata({ hostId: h, catalog: d.catalog, schema: d.schema, table: d.table, column: name, columnType: type })
+    // 편집 중 이름이 바뀌었으면 옛 컬럼을 지우고 새로 추가
+    if (d.editing && d.name && d.name.toLowerCase() !== name.toLowerCase()) {
+      void api
+        .deleteMetadata({ hostId: h, catalog: d.catalog, schema: d.schema, table: d.table, column: d.name })
+        .then(() => upsert())
+        .then((m) => setMetadata((cur) => ({ ...cur, [h]: m })))
+    } else {
+      applyMeta(h, upsert())
+    }
+  }
+  const renameMeta = (ref: MetadataRef, currentName: string): void => {
     const h = metaPanelHostId
     if (!h) return
     setPromptState({
-      title: `컬럼 추가 · ${schema}.${table}`,
-      placeholder: '컬럼 이름',
-      onSubmit: (name) =>
-        applyMeta(h, api.upsertMetadata({ hostId: h, catalog, schema, table, column: name }))
+      title: `이름 변경 · ${currentName}`,
+      initialValue: currentName,
+      placeholder: '새 이름',
+      onSubmit: (newName) => applyMeta(h, api.renameMetadata({ hostId: h, ...ref, newName }))
     })
   }
   const deleteMeta = (ref: MetadataRef, label: string): void => {
@@ -900,7 +942,8 @@ export default function App(): JSX.Element {
               onSelectHost={selectMetaHost}
               onAddSchema={promptAddSchema}
               onAddTable={promptAddTable}
-              onAddColumn={promptAddColumn}
+              onColumnEdit={openColumnEdit}
+              onRename={renameMeta}
               onDelete={deleteMeta}
             />
           )}
@@ -970,6 +1013,16 @@ export default function App(): JSX.Element {
             await promptState.onSubmit(value)
             setPromptState(null)
           }}
+        />
+      )}
+      {columnDialog && (
+        <ColumnEditDialog
+          parent={`${columnDialog.catalog}.${columnDialog.schema}.${columnDialog.table}`}
+          initialName={columnDialog.name}
+          initialType={columnDialog.type}
+          editing={columnDialog.editing}
+          onSubmit={submitColumn}
+          onClose={() => setColumnDialog(null)}
         />
       )}
       {closingTab && (

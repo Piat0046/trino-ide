@@ -25,6 +25,7 @@ const api: TrinoIdeApi = {
   openExternal: (url) => ipcRenderer.invoke('system:openExternal', url),
   getMetadata: (hostId) => ipcRenderer.invoke('metadata:get', hostId),
   upsertMetadata: (input) => ipcRenderer.invoke('metadata:upsert', input),
+  renameMetadata: (input) => ipcRenderer.invoke('metadata:rename', input),
   deleteMetadata: (input) => ipcRenderer.invoke('metadata:delete', input),
   clearLearnedMetadata: (hostId) => ipcRenderer.invoke('metadata:clearLearned', hostId),
   clearAllMetadata: (hostId) => ipcRenderer.invoke('metadata:clearAll', hostId),
