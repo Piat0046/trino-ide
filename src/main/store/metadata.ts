@@ -98,10 +98,17 @@ export function getHostMetadata(hostId: string): HostMetadata {
 
 /** 성공 쿼리에서 관찰한 참조를 학습(learned). ref는 호출부에서 host 기본값으로 보정된 값. */
 export function learnReference(hostId: string, ref: MetadataRef): void {
-  if (!ref.catalog) return
+  learnReferences(hostId, [ref])
+}
+
+/** 여러 참조를 한 번의 파일 쓰기로 학습(성공 쿼리 1건에 다중 테이블). */
+export function learnReferences(hostId: string, refs: MetadataRef[]): void {
+  const valid = refs.filter((r) => !!r.catalog)
+  if (valid.length === 0) return
   const data = read()
   const host = (data.hosts[hostId] ??= { catalogs: {} })
-  applyRef(host, ref, 'learned', Date.now())
+  const now = Date.now()
+  for (const ref of valid) applyRef(host, ref, 'learned', now)
   write(data)
 }
 

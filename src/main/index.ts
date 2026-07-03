@@ -1,6 +1,25 @@
 import { app, BrowserWindow, shell } from 'electron'
 import { join } from 'node:path'
 import { registerIpcHandlers } from './ipc'
+import { listHistory } from './store/history'
+import { getStoredHost } from './store/hosts'
+import { isBackfilled, markBackfilled } from './store/metadata'
+import { learnMetadataFromSql } from './learnMetadata'
+
+/** 최초 1회: 기존 history의 성공 쿼리로 메타데이터를 소급 학습한다(best-effort). */
+function backfillMetadataFromHistory(): void {
+  try {
+    if (isBackfilled()) return
+    for (const h of listHistory()) {
+      if (!h.ok) continue
+      const host = getStoredHost(h.hostId)
+      learnMetadataFromSql(h.hostId, h.sql, host?.catalog, host?.schema)
+    }
+    markBackfilled()
+  } catch {
+    // 소급 학습 실패는 무시한다.
+  }
+}
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -36,6 +55,7 @@ function createWindow(): void {
 
 app.whenReady().then(() => {
   registerIpcHandlers()
+  backfillMetadataFromHistory()
   createWindow()
 
   app.on('activate', () => {
