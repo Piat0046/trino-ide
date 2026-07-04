@@ -61,7 +61,7 @@ export function splitStatements(sql: string): Statement[] {
 }
 
 /** 한 구간에서 끝의 세미콜론을 제거하고 trim. */
-function statementText(chunk: string): string {
+export function statementText(chunk: string): string {
   return chunk.replace(/;\s*$/, '').trim()
 }
 
@@ -83,4 +83,53 @@ export function statementAtCursor(
     if (stmts[i].text) return stmts[i]
   }
   return stmts[stmts.length - 1]
+}
+
+/** 실행 대상 텍스트. 선택이 있으면 선택, 없으면 커서 문장. */
+export interface RunTarget {
+  mode: 'selection' | 'statement'
+  /** 실제로 실행/경고 판정에 쓰는 텍스트(끝 세미콜론 제거·trim) */
+  text: string
+  /** 선택이 여러 문장(세미콜론 경계)에 걸쳐 실행 불가 */
+  spansMultiple: boolean
+}
+
+/** 청크에 주석·공백이 아닌 실제 코드가 있는지(문자열/식별자 리터럴은 코드로 본다). */
+function hasCode(chunk: string): boolean {
+  const n = chunk.length
+  for (let i = 0; i < n; ) {
+    const c = chunk[i]
+    if (c === '-' && chunk[i + 1] === '-') {
+      i += 2
+      while (i < n && chunk[i] !== '\n') i++
+      continue
+    }
+    if (c === '/' && chunk[i + 1] === '*') {
+      i += 2
+      while (i < n && !(chunk[i] === '*' && chunk[i + 1] === '/')) i++
+      i += 2
+      continue
+    }
+    if (!/\s/.test(c)) return true
+    i++
+  }
+  return false
+}
+
+/**
+ * ⌘↵/실행이 대상으로 삼을 텍스트를 결정한다.
+ * 실제 코드가 있는(주석/공백만은 제외) 선택이 있으면 그 텍스트, 없으면 head가 놓인 커서 문장.
+ * spansMultiple은 주석/공백뿐인 청크를 빼고 실 코드 문장이 둘 이상일 때만 true.
+ * 순수 함수 — 실행·대용량 경고·활성 하이라이트가 이 단일 소스를 공유한다.
+ */
+export function resolveRunTarget(sql: string, from: number, to: number, head: number): RunTarget {
+  if (from !== to) {
+    const selText = statementText(sql.slice(from, to))
+    if (hasCode(selText)) {
+      const spansMultiple = splitStatements(selText).filter((s) => hasCode(s.text)).length > 1
+      return { mode: 'selection', text: selText, spansMultiple }
+    }
+  }
+  const stmt = statementAtCursor(sql, head)
+  return { mode: 'statement', text: stmt?.text ?? '', spansMultiple: false }
 }

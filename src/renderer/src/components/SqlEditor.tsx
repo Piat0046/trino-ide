@@ -6,7 +6,7 @@ import type { HostConfig, HostMetadata } from '@shared/types'
 import { cmTheme } from '../lib/cmTheme'
 import { activeStatement } from '../lib/cmActiveStatement'
 import { makeTrino, type CompletionMeta } from '../lib/trinoDialect'
-import { statementAtCursor } from '../lib/sqlStatements'
+import { resolveRunTarget, type RunTarget } from '../lib/sqlStatements'
 import { largeScanRisk, type LargeScanRisk } from '../lib/largeScan'
 import { formatSql } from '../lib/formatSql'
 import { IconAlertTriangle, IconFormat, IconPlay, IconSave, IconStop } from './icons'
@@ -95,39 +95,48 @@ export function SqlEditor({
     if (rowLimit !== null) setLimitText(String(rowLimit))
   }, [rowLimit])
 
-  // 대용량 조회 경고: 커서 문장 텍스트를 추적(타이핑=docChanged, 커서이동=selectionSet). 순수 텍스트, 서버 접근 0.
-  const [activeStmt, setActiveStmt] = useState('')
-  const activeStmtListener = useMemo(
+  // 실행 대상(선택 우선, 없으면 커서 문장)을 추적 — 실행·대용량 경고·활성 하이라이트가 공유하는 단일 소스.
+  const [runTarget, setRunTarget] = useState<RunTarget>({
+    mode: 'statement',
+    text: '',
+    spansMultiple: false
+  })
+  const runTargetListener = useMemo(
     () =>
       EditorView.updateListener.of((u) => {
         if (u.docChanged || u.selectionSet) {
-          const doc = u.state.doc.toString()
-          setActiveStmt(statementAtCursor(doc, u.state.selection.main.head)?.text ?? '')
+          const sel = u.state.selection.main
+          setRunTarget(resolveRunTarget(u.state.doc.toString(), sel.from, sel.to, sel.head))
         }
       }),
     []
   )
-  // 초기/탭 전환 시 시드(타이핑 중 갱신은 updateListener가 담당하므로 activeTabId에만 의존)
+  // 초기/탭 전환 시 시드(타이핑·커서 중 갱신은 updateListener가 담당하므로 activeTabId에만 의존)
   useEffect(() => {
     const view = cmRef.current?.view
-    if (view)
-      setActiveStmt(statementAtCursor(view.state.doc.toString(), view.state.selection.main.head)?.text ?? '')
+    if (view) {
+      const sel = view.state.selection.main
+      setRunTarget(resolveRunTarget(view.state.doc.toString(), sel.from, sel.to, sel.head))
+    }
   }, [activeTabId])
-  const scanRisk = largeScanRisk(activeStmt, rowLimit)
-
-  /** 커서가 놓인 문장 본문. view가 없으면 전체 텍스트로 폴백. */
-  const activeStatementText = (): string => {
-    const view = cmRef.current?.view
-    if (!view) return sqlText
-    const doc = view.state.doc.toString()
-    return statementAtCursor(doc, view.state.selection.main.head)?.text ?? ''
-  }
+  // 실행 불가(여러 문장 걸침) 상태에선 대용량 경고를 숨겨 모순 메시지를 피한다.
+  const scanRisk = runTarget.spansMultiple ? null : largeScanRisk(runTarget.text, rowLimit)
+  const runTitle = runTarget.spansMultiple
+    ? '선택 영역이 여러 문장에 걸쳐 있어 실행할 수 없어요 — 문장 하나만 선택하세요'
+    : runTarget.mode === 'selection'
+      ? '선택 영역 실행 (⌘↵)'
+      : '현재 문장 실행 (⌘↵)'
 
   const handleRun = (): void => {
     if (running || !hostId) return
-    const stmt = activeStatementText()
-    if (!stmt.trim()) return
-    onRun(stmt)
+    const view = cmRef.current?.view
+    const doc = view ? view.state.doc.toString() : sqlText
+    const from = view ? view.state.selection.main.from : 0
+    const to = view ? view.state.selection.main.to : 0
+    const head = view ? view.state.selection.main.head : 0
+    const target = resolveRunTarget(doc, from, to, head)
+    if (target.spansMultiple || !target.text.trim()) return
+    onRun(target.text)
   }
 
   const handleFormat = (): void => {
@@ -260,8 +269,9 @@ export function SqlEditor({
           <button
             className="primary"
             onClick={handleRun}
-            disabled={!hostId}
-            title="현재 문장 실행 (⌘↵)"
+            disabled={!hostId || runTarget.spansMultiple}
+            title={runTitle}
+            aria-label={runTitle}
           >
             <IconPlay size={13} />
             <span className="btn-label">실행</span>
@@ -282,7 +292,7 @@ export function SqlEditor({
             trinoSupport,
             cmTheme,
             activeStatement,
-            activeStmtListener,
+            runTargetListener,
             autocompletion({ activateOnTyping: true, selectOnOpen: false })
           ]}
           onChange={onChange}

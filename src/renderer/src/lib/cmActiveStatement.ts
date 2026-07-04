@@ -11,6 +11,9 @@ function buildDecorations(state: EditorState): DecorationSet {
   const doc = state.doc
   if (doc.length === 0) return Decoration.none
   const text = doc.toString()
+  // 실질 선택이 있으면 그 선택 자체가 실행 대상 — 커서 문장 워시는 억제해 혼동을 막는다.
+  const sel = state.selection.main
+  if (sel.from !== sel.to && text.slice(sel.from, sel.to).trim()) return Decoration.none
   const stmts = splitStatements(text)
   const head = state.selection.main.head
   const active = statementAtCursor(text, head, stmts)
