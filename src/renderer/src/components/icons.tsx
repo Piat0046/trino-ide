@@ -34,6 +34,16 @@ export const IconDatabase = ({ size }: IconProps): JSX.Element =>
 export const IconBookmark = ({ size }: IconProps): JSX.Element =>
   svg(<path d="M6 4h12v16l-6-4-6 4V4z" />, size)
 
+export const IconAlertTriangle = ({ size }: IconProps): JSX.Element =>
+  svg(
+    <>
+      <path d="M12 3.5 21 19H3L12 3.5z" />
+      <path d="M12 9.5v4.5" />
+      <path d="M12 17.2v.05" />
+    </>,
+    size
+  )
+
 export const IconClock = ({ size }: IconProps): JSX.Element =>
   svg(
     <>

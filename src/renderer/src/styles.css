@@ -804,6 +804,22 @@ select {
   width: auto;
 }
 
+/* 대용량 조회 경고 칩(비차단 자문 — 실행을 막지 않음). 앰버 신호, 에러(danger)와 구분 */
+.scan-warn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--warn);
+  background: var(--warn-dim);
+  border: 1px solid var(--warn);
+  border-radius: var(--r-sm);
+  padding: 4px 9px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: default;
+}
+
 /* 분할(좁은 창) 시 툴바 압축: 버튼 라벨·부가 텍스트 숨기고 아이콘만 */
 .editor-pane.compact .toolbar {
   gap: 6px;
