@@ -123,6 +123,37 @@ function buildDefaultCols(result: QueryResultPayload): ColConfig[] {
   })
 }
 
+/** 페이지네이션 결과에 ORDER BY 보존 위험(원본에 없음 or 서브쿼리 래핑)이 있는지. */
+function sqlHasOrderRisk(result: QueryResultPayload): boolean {
+  return result.orderByWarning || (result.paginated && result.pageWrapMode === 'subquery')
+}
+
+/** 페이지네이션 래핑 경로 + ORDER BY 보존 여부 배지. 이미 조립된 값만 표시 — 서버 접근 0. */
+function SqlWrapBadges({ result }: { result: QueryResultPayload }): JSX.Element | null {
+  if (!result.paginated) return null
+  const wrap = result.pageWrapMode
+  const orderMissing = result.orderByWarning
+  const orderRisk = !orderMissing && wrap === 'subquery' // ORDER BY는 있으나 서브쿼리 래핑
+  return (
+    <div className="msg-status sql-badges">
+      <span
+        className="stage-tag"
+        title={
+          wrap === 'subquery'
+            ? '원본에 이미 자체 LIMIT/OFFSET/FETCH가 있어 서브쿼리로 감싸 페이지네이션했습니다. 안쪽 ORDER BY가 보존되지 않을 수 있습니다.'
+            : '원본 쿼리 끝에 OFFSET/LIMIT을 이어붙였습니다. 최상위 ORDER BY가 그대로 유지됩니다.'
+        }
+      >
+        {wrap === 'subquery' ? '서브쿼리 래핑' : '덧붙임'}
+      </span>
+      <span className={'msg-badge ' + (orderMissing || orderRisk ? 'warn' : 'ok')}>
+        <span className="msg-badge-dot" />
+        {orderMissing ? 'ORDER BY 없음' : orderRisk ? 'ORDER BY 보존 안 될 수 있음' : 'ORDER BY 보존됨'}
+      </span>
+    </div>
+  )
+}
+
 export function ResultsPane({
   result,
   error,
@@ -815,6 +846,7 @@ export function ResultsPane({
                       <IconCopy size={13} />복사
                     </button>
                   </div>
+                  <SqlWrapBadges result={result} />
                   <pre className="msg-sql-body">{result.executedSql}</pre>
                 </div>
               )}
@@ -828,11 +860,16 @@ export function ResultsPane({
           </div>
         ) : (
           <>
-            {result.orderByWarning && (
+            {result.orderByWarning ? (
               <div className="warn-banner">
                 ⚠ ORDER BY가 없어 페이지 간 행 순서가 일정하지 않을 수 있습니다.
               </div>
-            )}
+            ) : result.paginated && result.pageWrapMode === 'subquery' ? (
+              <div className="warn-banner">
+                ⚠ 원본에 이미 LIMIT/OFFSET이 있어 서브쿼리로 래핑해 페이지네이션했습니다 — ORDER BY가
+                보존되지 않을 수 있습니다. 하단 &apos;SQL&apos; 버튼에서 실제 전송 SQL을 확인하세요.
+              </div>
+            ) : null}
             <div className="grid-wrap" ref={parentRef} tabIndex={0} onKeyDown={onGridKey}>
               <div className="grid2" style={{ width: totalWidth, minWidth: '100%' }}>
                 <div className="grid2-head" style={{ gridTemplateColumns: template, height: HEAD_H }}>
@@ -1047,9 +1084,14 @@ export function ResultsPane({
               <button
                 className={'sql-btn' + (sqlOpen ? ' active' : '')}
                 onClick={() => setSqlOpen((o) => !o)}
-                title="서버로 보낸 실제 SQL 보기"
+                title={
+                  sqlHasOrderRisk(result)
+                    ? '서버로 보낸 실제 SQL 보기 — ORDER BY 보존 여부 확인 필요'
+                    : '서버로 보낸 실제 SQL 보기'
+                }
               >
                 <IconCode size={13} /> SQL
+                {sqlHasOrderRisk(result) && <span style={{ color: 'var(--warn)' }}> ⚠</span>}
               </button>
               {sqlOpen && (
                 <div className="sql-pop">
@@ -1063,6 +1105,7 @@ export function ResultsPane({
                       <IconCopy size={13} />복사
                     </button>
                   </div>
+                  <SqlWrapBadges result={result} />
                   <pre>{result.executedSql}</pre>
                 </div>
               )}

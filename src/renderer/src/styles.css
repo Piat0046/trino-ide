@@ -1080,6 +1080,10 @@ select {
   gap: 10px;
   margin-bottom: 12px;
 }
+.sql-badges {
+  flex-wrap: wrap;
+  margin-bottom: 7px;
+}
 .msg-badge {
   display: inline-flex;
   align-items: center;

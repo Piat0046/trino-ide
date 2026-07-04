@@ -128,7 +128,8 @@ export function registerIpcHandlers(): void {
       const UNLIMITED_CAP = 50_000
       const cap = rowLimit == null ? UNLIMITED_CAP : rowLimit
       // 다음 페이지 존재 판단을 위해 1행 더 받아본다
-      const execSql = paginate ? wrapPaginated(req.sql, page * rowLimit, rowLimit + 1) : req.sql
+      const wrapped = paginate ? wrapPaginated(req.sql, page * rowLimit, rowLimit + 1) : null
+      const execSql = wrapped ? wrapped.sql : req.sql
       const fetchCap = paginate ? rowLimit + 1 : cap
 
       try {
@@ -145,6 +146,8 @@ export function registerIpcHandlers(): void {
           value.pageSize = limit
           value.hasNext = hasNext
           value.orderByWarning = !hasOrderBy(req.sql)
+          // 래핑 경로는 wrapPaginated가 이미 판정한 값을 그대로 사용(단일 소스)
+          value.pageWrapMode = wrapped!.mode
         } else {
           value.pageSize = typeof rowLimit === 'number' ? rowLimit : null
         }

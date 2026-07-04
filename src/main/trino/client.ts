@@ -277,18 +277,27 @@ export function hasOwnLimitOffset(sql: string): boolean {
   return false
 }
 
+/** 페이지네이션 래핑 결과. mode = 어느 경로를 탔는지(전송 SQL 미리보기 배지·ORDER BY 경고에 사용). */
+export interface WrappedQuery {
+  sql: string
+  mode: 'appended' | 'subquery'
+}
+
 /**
  * 원본 쿼리에 OFFSET/LIMIT 페이지네이션 부여.
  * - 자체 최상위 LIMIT/OFFSET/FETCH가 없으면: 원본 끝에 덧붙인다(최상위 ORDER BY 보존).
  * - 있으면: 덧붙이면 문법 충돌 → 서브쿼리로 감싼다(안쪽 ORDER BY는 보존 안 될 수 있음).
  */
-export function wrapPaginated(sql: string, offset: number, limit: number): string {
+export function wrapPaginated(sql: string, offset: number, limit: number): WrappedQuery {
   const inner = stripTrailing(sql)
   // 두 경로 모두 inner와 OFFSET을 줄바꿈으로 분리해 inner 끝의 줄주석(--)이 삼키지 않게 함
   if (!hasOwnLimitOffset(inner)) {
-    return `${inner}\nOFFSET ${offset} LIMIT ${limit}`
+    return { sql: `${inner}\nOFFSET ${offset} LIMIT ${limit}`, mode: 'appended' }
   }
-  return `SELECT * FROM (\n${inner}\n) AS _trino_ide_page\nOFFSET ${offset} LIMIT ${limit}`
+  return {
+    sql: `SELECT * FROM (\n${inner}\n) AS _trino_ide_page\nOFFSET ${offset} LIMIT ${limit}`,
+    mode: 'subquery'
+  }
 }
 
 /** 원본 쿼리에 ORDER BY가 보이는지(대략) — 없으면 페이지 순서 경고 */

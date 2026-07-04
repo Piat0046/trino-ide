@@ -98,6 +98,10 @@ export interface QueryResultPayload {
   hasNext: boolean
   /** 페이지네이션인데 원본에 ORDER BY가 없어 순서가 보장되지 않을 수 있음 */
   orderByWarning: boolean
+  /** 페이지네이션 래핑 경로. 'appended'=원본 끝에 OFFSET/LIMIT 덧붙임(최상위 ORDER BY 보존),
+   * 'subquery'=서브쿼리로 감쌈(원본에 자체 LIMIT/OFFSET/FETCH가 있을 때 — 안쪽 ORDER BY 미보존 가능).
+   * 비페이지네이션이면 null/미정. */
+  pageWrapMode?: 'appended' | 'subquery' | null
   /** 실제로 서버에 보낸 SQL(페이지네이션 래핑/덧붙임 포함). 페이지마다 OFFSET이 다르다 */
   executedSql: string
   /** Trino 경고(있을 때만). deprecated 문법 등 */
