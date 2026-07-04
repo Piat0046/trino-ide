@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import CodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror'
 import { autocompletion } from '@codemirror/autocomplete'
+import { EditorView } from '@codemirror/view'
 import type { HostConfig, HostMetadata } from '@shared/types'
 import { cmTheme } from '../lib/cmTheme'
 import { activeStatement } from '../lib/cmActiveStatement'
 import { makeTrino, type CompletionMeta } from '../lib/trinoDialect'
 import { statementAtCursor } from '../lib/sqlStatements'
+import { largeScanRisk, type LargeScanRisk } from '../lib/largeScan'
 import { formatSql } from '../lib/formatSql'
-import { IconFormat, IconPlay, IconSave, IconStop } from './icons'
+import { IconAlertTriangle, IconFormat, IconPlay, IconSave, IconStop } from './icons'
 import { EditorTabs, type TabView } from './EditorTabs'
 import { EnvBadge, envColor } from './EnvBadge'
 
@@ -44,6 +46,14 @@ interface Props {
 
 const NUMERIC_PRESETS = ['100', '300', '500', '1000', '5000', '10000']
 const FALLBACK_LIMIT = 300
+
+/** 대용량 스캔 힌트 문구(신호 조합별). 전송량(5만 행 상한)과 스캔 비용을 뭉뚱그리지 않는다. */
+const SCAN_WARN_COPY: Record<Exclude<LargeScanRisk, null>, string> = {
+  starNoWhere:
+    'SELECT *·WHERE 없이 무제한 모드로 실행하면 서버가 테이블 전체를 스캔합니다. LIMIT을 지정하거나 조회할 컬럼을 명시하세요. (전송은 5만 행 안전상한까지만 받지만, 그 전에 서버 스캔은 이미 끝나 있을 수 있어요.)',
+  noWhere: 'WHERE 없이 무제한 모드로 실행하면 서버가 테이블 전체를 스캔합니다. LIMIT을 지정하세요.',
+  star: 'SELECT *는 모든 컬럼을 가져옵니다. 무제한 모드에서는 필요한 컬럼만 명시하는 것을 권장합니다.'
+}
 
 export function SqlEditor({
   tabs,
@@ -84,6 +94,26 @@ export function SqlEditor({
   useEffect(() => {
     if (rowLimit !== null) setLimitText(String(rowLimit))
   }, [rowLimit])
+
+  // 대용량 조회 경고: 커서 문장 텍스트를 추적(타이핑=docChanged, 커서이동=selectionSet). 순수 텍스트, 서버 접근 0.
+  const [activeStmt, setActiveStmt] = useState('')
+  const activeStmtListener = useMemo(
+    () =>
+      EditorView.updateListener.of((u) => {
+        if (u.docChanged || u.selectionSet) {
+          const doc = u.state.doc.toString()
+          setActiveStmt(statementAtCursor(doc, u.state.selection.main.head)?.text ?? '')
+        }
+      }),
+    []
+  )
+  // 초기/탭 전환 시 시드(타이핑 중 갱신은 updateListener가 담당하므로 activeTabId에만 의존)
+  useEffect(() => {
+    const view = cmRef.current?.view
+    if (view)
+      setActiveStmt(statementAtCursor(view.state.doc.toString(), view.state.selection.main.head)?.text ?? '')
+  }, [activeTabId])
+  const scanRisk = largeScanRisk(activeStmt, rowLimit)
 
   /** 커서가 놓인 문장 본문. view가 없으면 전체 텍스트로 폴백. */
   const activeStatementText = (): string => {
@@ -169,6 +199,17 @@ export function SqlEditor({
         </select>
         <EnvBadge env={currentHost?.env} />
 
+        {scanRisk && (
+          <span
+            className="scan-warn"
+            title={SCAN_WARN_COPY[scanRisk]}
+            aria-label={SCAN_WARN_COPY[scanRisk]}
+          >
+            <IconAlertTriangle size={13} />
+            <span className="btn-label">대용량 위험</span>
+          </span>
+        )}
+
         <span className="spacer" />
 
         <div className="limit-control">
@@ -241,6 +282,7 @@ export function SqlEditor({
             trinoSupport,
             cmTheme,
             activeStatement,
+            activeStmtListener,
             autocompletion({ activateOnTyping: true, selectOnOpen: false })
           ]}
           onChange={onChange}
