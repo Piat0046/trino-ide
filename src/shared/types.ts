@@ -1,5 +1,8 @@
 // Main 프로세스와 Renderer가 공유하는 타입. 런타임 코드가 없어야 한다(타입 전용).
 
+/** 연결 환경 라벨. 색 신호와 실행 가드에 쓰이는 로컬 메타(미지정 가능). */
+export type HostEnv = 'dev' | 'staging' | 'prod'
+
 /** Renderer에 노출되는 host 정보. 비밀번호는 절대 포함하지 않는다. */
 export interface HostConfig {
   id: string
@@ -11,6 +14,10 @@ export interface HostConfig {
   schema?: string
   /** https self-signed 인증서 검증을 무시할지 여부 */
   insecure?: boolean
+  /** 연결 환경 라벨(색/가드 신호). 미지정이면 중립. */
+  env?: HostEnv
+  /** env가 prod일 때 이 연결로 실행 전 확인 모달을 띄울지(옵트인). */
+  confirmBeforeRun?: boolean
   /** 저장된 비밀번호가 있는지 여부 (값 자체는 노출하지 않음) */
   hasPassword: boolean
 }
@@ -24,6 +31,8 @@ export interface HostInput {
   catalog?: string
   schema?: string
   insecure?: boolean
+  env?: HostEnv
+  confirmBeforeRun?: boolean
   /** undefined/'' 이면 기존 비밀번호 유지(수정 시), 새 값이면 교체 */
   password?: string
 }

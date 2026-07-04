@@ -1,4 +1,5 @@
 import type { HostConfig } from '@shared/types'
+import { EnvBadge, envColor } from './EnvBadge'
 
 interface Props {
   hosts: HostConfig[]
@@ -26,8 +27,12 @@ export function HostList({ hosts, selectedHostId, onSelect, onEdit, onDelete }: 
             onClick={() => onSelect(h.id)}
           >
             <div className="host-top">
-              <span className="host-dot" />
+              <span
+                className="host-dot"
+                style={envColor(h.env) ? { background: envColor(h.env) as string } : undefined}
+              />
               <span className="host-name">{h.name}</span>
+              <EnvBadge env={h.env} />
               <div className="row-actions">
                 <button
                   onClick={(e) => {

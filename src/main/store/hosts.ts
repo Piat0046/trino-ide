@@ -2,7 +2,7 @@ import { app, safeStorage } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import type { HostConfig, HostInput } from '@shared/types'
+import type { HostConfig, HostEnv, HostInput } from '@shared/types'
 
 /**
  * host 설정은 <userData>/hosts.json 에 저장한다.
@@ -19,6 +19,8 @@ interface StoredHost {
   catalog?: string
   schema?: string
   insecure?: boolean
+  env?: HostEnv
+  confirmBeforeRun?: boolean
   encryptedPassword?: string
 }
 
@@ -74,6 +76,8 @@ function toConfig(h: StoredHost): HostConfig {
     catalog: h.catalog,
     schema: h.schema,
     insecure: h.insecure,
+    env: h.env,
+    confirmBeforeRun: h.confirmBeforeRun,
     hasPassword: Boolean(h.encryptedPassword)
   }
 }
@@ -103,6 +107,8 @@ export function saveHost(input: HostInput): HostConfig {
     catalog: input.catalog || undefined,
     schema: input.schema || undefined,
     insecure: input.insecure || undefined,
+    env: input.env || undefined,
+    confirmBeforeRun: input.confirmBeforeRun || undefined,
     encryptedPassword
   }
 

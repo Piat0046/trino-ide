@@ -383,8 +383,24 @@ export default function App(): JSX.Element {
   }
 
   const runFresh = (tabId: string, sqlText: string, hostId: string): void => {
-    updateTab(tabId, { lastRun: { sql: sqlText, hostId } })
-    void executeQuery(tabId, sqlText, hostId, 0, true)
+    const doExecute = (): void => {
+      updateTab(tabId, { lastRun: { sql: sqlText, hostId } })
+      void executeQuery(tabId, sqlText, hostId, 0, true)
+    }
+    // prod로 지정 + 옵트인한 연결이면 실행 전 확인(로컬 host.env 조회만 — 서버 호출 없음)
+    const host = hosts.find((h) => h.id === hostId)
+    if (host?.env === 'prod' && host.confirmBeforeRun) {
+      askConfirm({
+        title: 'PROD 연결 실행',
+        message: `'${host.name}'은 prod로 지정된 연결입니다. 이 문장을 실행할까요?`,
+        extra: <div className="sql-preview">{sqlText}</div>,
+        confirmLabel: '실행',
+        danger: true,
+        onConfirm: doExecute
+      })
+    } else {
+      doExecute()
+    }
   }
 
 

@@ -1,4 +1,5 @@
 import type { HostConfig, QueryResultPayload } from '@shared/types'
+import { EnvBadge } from './EnvBadge'
 
 interface Props {
   selectedHost: HostConfig | null
@@ -24,6 +25,7 @@ export function StatusBar({ selectedHost, running, result, error }: Props): JSX.
       <span className="conn-live">
         <span className={'live-dot ' + dotClass} />
         {selectedHost ? selectedHost.name : '연결 선택 안 됨'}
+        {selectedHost && <EnvBadge env={selectedHost.env} />}
       </span>
       {selectedHost && <span>{selectedHost.url}</span>}
       {ctx && <span className="ctx-badge">{ctx}</span>}
