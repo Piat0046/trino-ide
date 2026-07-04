@@ -230,7 +230,7 @@ export function SqlEditor({
 
       <div
         className="cm-host"
-        style={envSignal ? { boxShadow: 'inset 0 0 0 2px ' + envSignal } : undefined}
+        style={envSignal ? { border: '2px solid ' + envSignal } : undefined}
       >
         <CodeMirror
           ref={cmRef}
