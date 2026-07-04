@@ -9,6 +9,7 @@ import { statementAtCursor } from '../lib/sqlStatements'
 import { formatSql } from '../lib/formatSql'
 import { IconFormat, IconPlay, IconSave, IconStop } from './icons'
 import { EditorTabs, type TabView } from './EditorTabs'
+import { EnvBadge, envColor } from './EnvBadge'
 
 interface Props {
   // tabs
@@ -67,6 +68,8 @@ export function SqlEditor({
   onToggleSplit
 }: Props): JSX.Element {
   const cmRef = useRef<ReactCodeMirrorRef>(null)
+  const currentHost = hosts.find((h) => h.id === hostId) ?? null
+  const envSignal = envColor(currentHost?.env)
 
   // 자동완성 소스가 매 호출 읽는 현재 host 메타데이터(ref만 갱신, 확장 인스턴스는 고정 → reconfigure churn 방지)
   const metaRef = useRef<CompletionMeta>({ meta: null })
@@ -153,16 +156,18 @@ export function SqlEditor({
           className="conn-select"
           value={hostId ?? ''}
           onChange={(e) => onSelectHost(e.target.value)}
+          style={envSignal ? { borderLeft: '2px solid ' + envSignal } : undefined}
         >
           <option value="" disabled>
             연결 선택…
           </option>
           {hosts.map((h) => (
             <option key={h.id} value={h.id}>
-              {h.name} — {h.url}
+              {h.name + (h.env ? ` [${h.env}]` : '') + ' — ' + h.url}
             </option>
           ))}
         </select>
+        <EnvBadge env={currentHost?.env} />
 
         <span className="spacer" />
 
@@ -223,7 +228,10 @@ export function SqlEditor({
         )}
       </div>
 
-      <div className="cm-host">
+      <div
+        className="cm-host"
+        style={envSignal ? { boxShadow: 'inset 0 0 0 2px ' + envSignal } : undefined}
+      >
         <CodeMirror
           ref={cmRef}
           value={sqlText}

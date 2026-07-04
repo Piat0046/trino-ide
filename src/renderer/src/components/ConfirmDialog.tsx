@@ -1,8 +1,11 @@
+import type { ReactNode } from 'react'
 import { useEscClose } from '../lib/useEscClose'
 
 export interface ConfirmConfig {
   title: string
   message?: string
+  /** 메시지 아래에 붙일 부가 콘텐츠(예: 실행될 SQL 미리보기) */
+  extra?: ReactNode
   confirmLabel?: string
   /** 파괴적 작업이면 확인 버튼을 빨강으로 */
   danger?: boolean
@@ -17,6 +20,7 @@ interface Props extends ConfirmConfig {
 export function ConfirmDialog({
   title,
   message,
+  extra,
   confirmLabel = '확인',
   danger,
   onConfirm,
@@ -34,6 +38,7 @@ export function ConfirmDialog({
       >
         <h2>{title}</h2>
         {message && <p className="modal-msg">{message}</p>}
+        {extra}
         <div className="modal-actions">
           <button onClick={onCancel}>취소</button>
           <span className="spacer" />

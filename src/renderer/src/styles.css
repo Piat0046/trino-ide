@@ -364,6 +364,7 @@ select {
 .host-name {
   font-weight: 500;
   font-size: 13px;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -379,6 +380,39 @@ select {
 .host-item:hover .host-top .row-actions,
 .host-item.selected .host-top .row-actions {
   display: flex;
+}
+
+/* 연결 환경 배지(prod/staging=신호색 pill, dev=플레인 텍스트) */
+.env-badge {
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 1px 5px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.env-badge.env-prod {
+  color: var(--danger);
+  background: var(--danger-dim);
+  border: 1px solid var(--danger);
+}
+.env-badge.env-staging {
+  color: var(--warn);
+  background: var(--warn-dim);
+  border: 1px solid var(--warn);
+}
+.env-badge.env-dev {
+  color: var(--text-2);
+}
+.host-env-hint {
+  margin: -2px 0 2px;
+  font-size: 11px;
+}
+/* 좁은 분할(compact) 툴바에선 env 배지를 숨긴다 — select border-left·에디터 테두리 색이 이미 env를 신호 */
+.editor-pane.compact .toolbar .env-badge {
+  display: none;
 }
 
 /* history */
