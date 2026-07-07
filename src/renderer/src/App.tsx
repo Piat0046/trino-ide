@@ -17,6 +17,7 @@ import { MetadataPanel } from './components/MetadataPanel'
 import { ColumnEditDialog } from './components/ColumnEditDialog'
 import { HostDialog } from './components/HostDialog'
 import { SqlEditor } from './components/SqlEditor'
+import { scanParams } from './lib/queryParams'
 import { ResultsPane } from './components/ResultsPane'
 import { StatusBar } from './components/StatusBar'
 import { SaveQueryDialog, type SaveQueryResult } from './components/SaveQueryDialog'
@@ -620,6 +621,12 @@ export default function App(): JSX.Element {
       setToast('먼저 연결을 선택하세요.')
       return
     }
+    // 파라미터가 있으면 raw 템플릿을 그대로 실행하지 않는다(서버 파싱 에러·history 오염 방지) —
+    // 탭만 열어 포커스하고 인라인 바에서 값을 채워 실행하도록 유도한다.
+    if (scanParams(q.sql).length > 0) {
+      setToast('매개변수를 채우고 실행하세요.')
+      return
+    }
     runFresh(tab.id, tab.sql, hostId)
   }
   const renameSaved = (q: SavedQuery): void =>
@@ -904,6 +911,8 @@ export default function App(): JSX.Element {
           onSave={() => saveInPane(pane.id)}
           running={pa?.running ?? false}
           isScratch={pa ? pa.savedQueryId === null : true}
+          savedQueryId={pa?.savedQueryId ?? null}
+          onNotify={setToast}
           hosts={hosts}
           hostId={pa?.hostId ?? null}
           onSelectHost={(id) => selectHostInPane(pane.id, id)}
