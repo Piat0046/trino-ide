@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent
+} from 'react'
 import type {
   HistoryEntry,
   HostConfig,
@@ -35,6 +41,7 @@ import {
   makeScratch,
   nextUntitled
 } from './lib/tabs'
+import { hydrateSession, serializeSession } from './lib/session'
 
 const api = window.api
 
@@ -88,10 +95,16 @@ export default function App(): JSX.Element {
 
   // ----- 멀티 탭 / 분할 pane -----
   // panes.length===1 이면 단일 화면, 2 이면 세로 분할(#3~). focusedPane = 마지막으로 만진 창.
-  const [panes, setPanes] = useState<Pane[]>(() => [
-    makePane([makeScratch('', null, 'Untitled query 1')])
-  ])
-  const [focusedPaneId, setFocusedPaneId] = useState<string>('')
+  // 세션 복원(#12): 재시작 시 직전 탭들의 SQL·레이아웃을 localStorage에서 되살린다(한 번만 hydrate).
+  const bootRef = useRef<ReturnType<typeof hydrateSession> | undefined>(undefined)
+  if (bootRef.current === undefined) bootRef.current = hydrateSession()
+  const boot = bootRef.current
+  const [panes, setPanes] = useState<Pane[]>(
+    () => boot?.panes ?? [makePane([makeScratch('', null, 'Untitled query 1')])]
+  )
+  const [focusedPaneId, setFocusedPaneId] = useState<string>(() => boot?.focusedPaneId ?? '')
+  // 저장 쿼리 라이브러리가 실제로 로드되기 전에는 reconcile을 돌리지 않는다(복원된 바인딩 탭 오변환 방지)
+  const [libraryLoaded, setLibraryLoaded] = useState(false)
   const [closingTabId, setClosingTabId] = useState<string | null>(null)
   const [pendingCloseTabId, setPendingCloseTabId] = useState<string | null>(null)
   // 분할 시 왼쪽 pane 비율(0.3~0.7). 저장 대상 탭(pane별 스크래치 저장용)
@@ -202,7 +215,7 @@ export default function App(): JSX.Element {
   useEffect(() => {
     void refreshHosts()
     void refreshHistory()
-    void refreshSaved()
+    void refreshSaved().finally(() => setLibraryLoaded(true))
   }, [refreshHosts, refreshHistory, refreshSaved])
 
   // 첫 pane을 포커스로 초기화(이후 #4에서 pane 내부 상호작용이 갱신)
@@ -266,19 +279,25 @@ export default function App(): JSX.Element {
     localStorage.setItem('wsSplitRatio', String(splitRatio))
   }, [splitRatio])
 
-  // host가 로드되면 hostId 없는 탭에 기본 연결 채움(모든 pane)
+  // hostId 정리(모든 pane): 삭제된 host를 가리키는 탭(복원분 포함)은 정리하고, 빈 hostId는 기본 연결로 채움.
+  // hosts 미로드(length 0) 시엔 복원된 hostId를 성급히 지우지 않는다.
   useEffect(() => {
-    if (!selectedHostId) return
     setPanes((prev) =>
       prev.map((p) => ({
         ...p,
-        tabs: p.tabs.map((t) => (t.hostId ? t : { ...t, hostId: selectedHostId }))
+        tabs: p.tabs.map((t) => {
+          const valid = t.hostId && (hosts.length === 0 || hosts.some((h) => h.id === t.hostId))
+          const hostId = valid ? t.hostId : selectedHostId
+          return hostId === t.hostId ? t : { ...t, hostId }
+        })
       }))
     )
-  }, [selectedHostId])
+  }, [selectedHostId, hosts])
 
-  // library 변경 시: 삭제된 저장 쿼리에 바인딩된 탭은 스크래치로 변환(작업 보존, 모든 pane)
+  // library 변경 시: 삭제된 저장 쿼리에 바인딩된 탭은 스크래치로 변환(작업 보존, 모든 pane).
+  // 라이브러리 최초 로드 전에는 건너뛴다 — 복원된 바인딩 탭이 빈 초기 library로 오변환되는 것 방지.
   useEffect(() => {
+    if (!libraryLoaded) return
     setPanes((prev) =>
       prev.map((p) => ({
         ...p,
@@ -289,7 +308,30 @@ export default function App(): JSX.Element {
         )
       }))
     )
-  }, [library])
+  }, [library, libraryLoaded])
+
+  // ----- 세션 영속화(#12): 탭 SQL·레이아웃을 재시작 후 복원 -----
+  // 타이핑마다 panes가 바뀌므로 디바운스 저장(입력 랙 방지).
+  useEffect(() => {
+    const id = setTimeout(() => serializeSession(panes, focusedPaneId), 500)
+    return () => clearTimeout(id)
+  }, [panes, focusedPaneId])
+  // 창을 닫거나 숨길 때 즉시 플러시(디바운스 대기분 유실 최소화). 리스너는 1회만 등록.
+  const sessionRef = useRef({ panes, focusedPaneId })
+  sessionRef.current = { panes, focusedPaneId }
+  useEffect(() => {
+    const flush = (): void =>
+      serializeSession(sessionRef.current.panes, sessionRef.current.focusedPaneId)
+    const onVis = (): void => {
+      if (document.visibilityState === 'hidden') flush()
+    }
+    window.addEventListener('beforeunload', flush)
+    document.addEventListener('visibilitychange', onVis)
+    return () => {
+      window.removeEventListener('beforeunload', flush)
+      document.removeEventListener('visibilitychange', onVis)
+    }
+  }, [])
 
   // ----- host CRUD -----
   const openAdd = (): void => {
