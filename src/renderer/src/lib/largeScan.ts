@@ -1,8 +1,8 @@
-// 무제한 모드에서 SELECT * · WHERE 없는 대용량 조회를 실행 전에 감지(순수 텍스트, 서버 접근 0).
-// 핵심 근거: rowLimit이 숫자면 main/ipc가 wrapPaginated로 자동 상한을 걸어주므로(canPaginate 통과 시)
-// 안전하다 — 진짜 "상한 없는 전체 스캔" 위험은 무제한 토글(rowLimit === null)에서만 실재한다.
-// 스캐너 골격(문자열/주석/괄호깊이 인식, depth 0에서 키워드 검사)은 main/trino/client.ts의
-// hasOwnLimitOffset과 동일하다. main↔renderer는 별도 번들이라 직접 import가 불가해 규칙을 이식한다.
+// 사용자 SQL에 최상위 LIMIT이 없으면 실행 전에 경고(순수 텍스트, 서버 접근 0).
+// 근거: 앱은 SQL을 재작성하지 않고 원본을 그대로 1회 실행한다(SAFETY_CAP까지 수신). 따라서
+// 서버 부하를 실제로 줄이는 건 사용자가 SQL에 LIMIT을 거는 것(서버 pushdown)뿐이다.
+// LIMIT이 있으면 서버가 그만큼만 계산·전송하므로 조용하고, 없으면 전체 스캔 위험을 알린다.
+// 스캐너 골격(문자열/주석/괄호깊이 인식, depth 0 키워드 검사)은 순수 텍스트 판정이다.
 
 /** 선행 공백·주석을 건너뛴 나머지. */
 function stripLeadingComments(s: string): string {
@@ -26,7 +26,7 @@ function stripLeadingComments(s: string): string {
   return s.slice(i)
 }
 
-/** 문장 헤드가 SELECT/WITH인지(= 스캔형 쿼리). canPaginate의 헤드 판정과 동일 규칙. */
+/** 문장 헤드가 SELECT/WITH인지(= 스캔형 쿼리). 선행 주석·괄호를 건너뛰고 판정. */
 export function isSelectLike(sql: string): boolean {
   const head = stripLeadingComments(sql).replace(/^\(+\s*/, '')
   return /^(select|with)\b/i.test(head)
@@ -125,25 +125,25 @@ function scan(sql: string): ScanFlags {
   return f
 }
 
-/** 힌트 종류. null이면 위험 없음(힌트 미표시). */
-export type LargeScanRisk = 'starNoWhere' | 'noWhere' | 'star' | null
+/** 힌트 종류(심각도 순). null이면 LIMIT 있음/해당없음 → 힌트 미표시. */
+export type LargeScanRisk = 'starNoWhere' | 'noWhere' | 'star' | 'noLimit' | null
 
 /**
- * 무제한 모드에서 대용량 스캔 위험을 판정. 순수 텍스트 분석 — 추가 쿼리/스키마 조회 없음.
- * 게이트(AND): 무제한 모드 · SELECT/WITH · 최상위 FROM 존재 · 자체 LIMIT 없음.
- * 신호(OR): 최상위 SELECT * · 최상위 WHERE 없음.
+ * 사용자 SQL에 최상위 LIMIT이 없어 서버가 전체를 계산·전송할 위험을 판정.
+ * 순수 텍스트 분석 — 추가 쿼리/스키마 조회 없음.
+ * 게이트(AND): SELECT/WITH · 최상위 FROM 존재 · 자체 LIMIT/OFFSET/FETCH 없음.
+ * 신호로 심각도 등급화: SELECT * / WHERE 없음이면 강하게, 필터돼 있으면 가벼운 'noLimit'.
  */
-export function largeScanRisk(sql: string, rowLimit: number | null): LargeScanRisk {
-  if (rowLimit !== null) return null // G1: 숫자 rowLimit은 ipc가 자동 캡 → 경고 피로 방지
+export function largeScanRisk(sql: string): LargeScanRisk {
   if (!sql.trim()) return null
-  if (!isSelectLike(sql)) return null // G2
+  if (!isSelectLike(sql)) return null // SELECT/WITH만
   const f = scan(sql)
-  if (!f.hasTopFrom) return null // G3: FROM 없는 SELECT 1 등은 스캔 개념 없음
-  if (f.hasOwnLimit) return null // G4: 사용자가 이미 LIMIT/OFFSET/FETCH 지정
+  if (!f.hasTopFrom) return null // FROM 없는 SELECT 1 등은 스캔 개념 없음
+  if (f.hasOwnLimit) return null // LIMIT/OFFSET/FETCH 있으면 서버 pushdown → 조용
   const star = f.hasTopSelectStar
   const noWhere = !f.hasTopWhere
   if (star && noWhere) return 'starNoWhere'
   if (noWhere) return 'noWhere'
   if (star) return 'star'
-  return null
+  return 'noLimit' // 필터·컬럼 명시돼 있으나 최상위 LIMIT만 없음 — 가벼운 경고
 }

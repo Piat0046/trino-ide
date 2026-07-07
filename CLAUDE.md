@@ -51,25 +51,22 @@ renderer (React)  ──IPC──▶  main process  ──HTTP──▶  Trino
 ### 레이어와 책임 (`src/`)
 - `shared/types.ts` — main과 renderer가 **공유하는 타입 전용** 모듈(런타임 코드 금지). `HostConfig`/`HostInput`/`QueryResultPayload`/`IpcResult<T>`/`TrinoIdeApi`의 단일 출처.
 - `main/index.ts` — 앱 생명주기, BrowserWindow 생성. dev면 `ELECTRON_RENDERER_URL` 로드, 아니면 `out/renderer/index.html`.
-- `main/ipc.ts` — 모든 IPC 핸들러 등록. host 입력을 접속 정보(`ResolvedConn`)로 **복호화**하고, 실행 중 쿼리를 `requestId → {token, conn}` 맵으로 추적해 취소를 지원한다. `query:run`은 **성공/실패 모두 `history` 저장소에 자동 기록**(단 `recordHistory=false`면 생략 — 페이지 이동 재실행용)하고, **페이지네이션**을 적용한다(아래).
-- `main/trino/client.ts` — `trino-client`로 쿼리 실행. `runQuery(conn, sql, token, rowLimit, onProgress?)`가 `trino.query()`의 async iterator(nextUri 페이징)를 돌며 columns/data/stats를 누적. `rowLimit`(숫자) 도달 시 서버 쿼리를 `cancel`하고 `truncated` 표시, `rowLimit === null`이면 무제한 수신. 기본값 `DEFAULT_ROW_LIMIT`(300). 페이지네이션 헬퍼 `canPaginate`/`wrapPaginated`/`hasOwnLimitOffset`/`hasOrderBy`도 여기 있다. 에러는 `TrinoQueryError`(errorName/errorType/errorCode + Trino 런타임 필드 `errorLocation`의 line/column 보존)로 던진다. `onProgress`는 페이지마다 stats를 흘려보내지만 **trino-client의 iterator가 `data`가 빈 stats-only 페이지를 내부에서 건너뛰므로**(`QueryIterator.next()` 재귀 skip) 진행 stats는 **데이터가 실린 페이지에서만** 스트리밍된다(계획/큐 단계는 안 옴 → 라이브 경과 타이머가 그 공백을 메운다).
+- `main/ipc.ts` — 모든 IPC 핸들러 등록. host 입력을 접속 정보(`ResolvedConn`)로 **복호화**하고, 실행 중 쿼리를 `requestId → {token, conn}` 맵으로 추적해 취소를 지원한다. `query:run`은 **성공/실패 모두 `history` 저장소에 자동 기록**하고, 사용자 SQL을 **재작성 없이 그대로 1회 실행**한다(아래 결과 수신).
+- `main/trino/client.ts` — `trino-client`로 쿼리 실행. `runQuery(conn, sql, token, rowLimit, onProgress?)`가 `trino.query()`의 async iterator(nextUri 페이징)를 돌며 columns/data/stats를 누적. `rowLimit`(기본 `SAFETY_CAP`=5만) 도달 시 서버 쿼리를 `cancel`하고 `truncated` 표시. **SQL은 재작성하지 않는다** — 원본을 그대로 실행한다(페이지네이션 헬퍼 `canPaginate`/`wrapPaginated` 등은 제거됨). 에러는 `TrinoQueryError`(errorName/errorType/errorCode + Trino 런타임 필드 `errorLocation`의 line/column 보존)로 던진다. `onProgress`는 페이지마다 stats를 흘려보내지만 **trino-client의 iterator가 `data`가 빈 stats-only 페이지를 내부에서 건너뛰므로**(`QueryIterator.next()` 재귀 skip) 진행 stats는 **데이터가 실린 페이지에서만** 스트리밍된다(계획/큐 단계는 안 옴 → 라이브 경과 타이머가 그 공백을 메운다).
 
-### 페이지네이션 (방식 B — 매 페이지 OFFSET/LIMIT 재실행)
-- `rowLimit`이 **숫자(=페이지 크기)**이고 SQL이 **SELECT/WITH 단일 문**(`canPaginate`)일 때만 활성. 무제한/비SELECT(SHOW/DESCRIBE/DDL 등)는 비활성(단일 실행).
-- `wrapPaginated`는 OFFSET/LIMIT을 **두 방식**으로 부여한다(`page*size` OFFSET, `size+1` LIMIT — **+1행으로 `hasNext` 판정** 후 size로 잘라냄):
-  - 원본에 **자체 최상위 `LIMIT`/`OFFSET`/`FETCH`가 없으면** → 원본 끝에 **덧붙임**(`<원본>\nOFFSET .. LIMIT ..`). **최상위 `ORDER BY`가 그대로 유지**돼 정렬이 보존된다.
-  - 있으면(덧붙이면 문법 충돌) → `SELECT * FROM ( <원본> ) AS _trino_ide_page OFFSET .. LIMIT ..`로 **서브쿼리 래핑**. ⚠ 이 경로에선 안쪽 `ORDER BY`가 보존되지 않을 수 있음(알려진 한계).
-  - "최상위" 판별은 `hasOwnLimitOffset`이 **괄호 깊이 + 문자열/식별자/주석을 인식**해 서브쿼리 속 LIMIT이나 문자열·주석 속 단어에 오판하지 않는다.
-- Trino는 결과 커서가 없어 페이지마다 쿼리를 **재실행**한다(stateless). `ORDER BY`가 없으면 페이지 간 순서가 보장되지 않아 `orderByWarning`으로 경고. 큰 OFFSET일수록 서버 재연산 비용↑.
-- renderer는 `result.page`/`hasNext`로 ◀▶ 이동, 페이지 이동 시 `query:run`에 `page±1` + `recordHistory:false`로 재요청한다.
-- `main/store/settings.ts` — 앱 전역 설정(`<userData>/settings.json`). 현재 `rowLimit`(기본 300, `null`=무제한). `getSettings`/`updateSettings`.
+### 결과 수신 (원본 SQL 1회 실행 + 클라이언트 페이지네이션) — #40
+- **SQL을 재작성하지 않는다.** `query:run`은 사용자가 쓴 문장을 **그대로 1회 실행**한다(OFFSET/LIMIT 주입·서브쿼리 래핑·페이지 재실행 **없음**). 근거: Trino `nextUri`는 단일 실행을 forward 스트리밍하는 커서라 재작성 없이 결과를 받아올 수 있고, 재작성 페이지네이션(구 "방식 B")은 정확성(ORDER BY 없을 때 페이지 간 행 중복/누락)·투명성(사용자 SQL≠전송 SQL)·서버 부하(OFFSET 재스캔) 모두에서 열등했다.
+- **메모리 보호 안전 상한** `SAFETY_CAP`(`client.ts`, 5만 행)까지만 스트림 수신 후 서버 쿼리를 `cancel`(= nextUri DELETE) → 초과 시 `truncated`로 "SQL에 LIMIT/WHERE로 좁혀 재실행" 안내. 서버엔 최초 수신 몇 초 외 아무것도 안 띄운다.
+- **페이지네이션은 클라이언트가** — 받은 결과 전체가 renderer 메모리에 있고 `ResultsPane`의 `@tanstack/react-virtual` 가상 스크롤로 열람한다(서버 왕복·◀▶ 페이저 없음). 딥 페이징은 지원하지 않는다(서버 부하 회피).
+- **진짜 서버 부하 절감은 사용자가 SQL에 `LIMIT`을 거는 것**(서버 pushdown/top-N) — 그래서 커서 문장에 최상위 LIMIT이 없으면 `largeScanRisk`가 경고 칩("LIMIT 없음")을 띄워 유도한다.
+- `main/store/settings.ts` — 앱 전역 설정(`<userData>/settings.json`). 현재 사용자 설정 항목 없음(`AppSettings`는 빈 인터페이스, 향후 확장용). `getSettings`/`updateSettings`.
 - `main/store/hosts.ts` — host 영속화. `<userData>/hosts.json` 평문 + 비밀번호만 `safeStorage`(OS 키체인)로 암호화해 `enc:<base64>`로 저장. 키체인 불가 환경은 `plain:<base64>` 폴백(난독화 수준).
 - `main/store/history.ts` — 쿼리 실행 기록 영속화. `<userData>/history.json`에 **최신순**으로 저장, 최근 `MAX_HISTORY`(200)개만 유지. `addHistory`/`listHistory`/`deleteHistory`/`clearHistory`.
 - `main/store/savedQueries.ts` — 저장 쿼리 라이브러리(`<userData>/saved-queries.json`). 1단계 `폴더(QueryFolder)` + 폴더 소속 `SavedQuery`. 폴더 삭제 시 안의 쿼리 **연쇄삭제**, `createQuery`는 대상 폴더가 없으면 거부.
 - `preload/index.ts` — `window.api`(=`TrinoIdeApi`) 노출. `preload/index.d.ts`가 `Window.api` 전역 타입 보강.
 ### 멀티 탭 에디터 모델 (`renderer/src/lib/tabs.ts`)
 - **탭 1개 = 독립 SQL 문서**(`EditorTab`). `savedQueryId!=null`이면 저장 쿼리 **바인딩** 탭, null이면 미저장 **스크래치** 탭. `dirty = sql !== baseSql`.
-- **탭별 상태**: `sql`/`baseSql`/`hostId`/`result`/`error`/`running`/`requestId`/`lastRun`. **전역**: `hosts`/`selectedHostId`/`rowLimit`/`library`/`history`. → 즉 **결과·연결은 탭마다, LIMIT은 전역**.
+- **탭별 상태**: `sql`/`baseSql`/`hostId`/`result`/`error`/`running`/`requestId`/`progress`. **전역**: `hosts`/`selectedHostId`/`library`/`history`. → 즉 **결과·연결은 탭마다**.
 - 저장 쿼리 클릭 = **open-or-focus**(같은 쿼리가 열려 있으면 그 탭 포커스, 아니면 새 탭). 히스토리·새 탭은 항상 새 스크래치. 폴더 `＋쿼리`는 **빈 SQL** 쿼리를 `Untitled query N`으로 즉시 생성→바인딩 탭으로 연다.
 - 저장(💾): 스크래치면 `SaveQueryDialog`로 저장 후 그 탭을 **리바인딩**, 바인딩이면 `updateQuery`로 **덮어쓰기**. 닫기: dirty면 `CloseTabDialog`(저장/저장안함/취소), 마지막 탭 닫으면 새 스크래치 자동 생성. 저장 쿼리가 삭제되면 열린 탭은 **스크래치로 변환**(작업 보존, `App`의 reconcile effect).
 
@@ -79,19 +76,19 @@ renderer (React)  ──IPC──▶  main process  ──HTTP──▶  Trino
   - `HostList` (연결 목록/선택/편집/삭제) — 추가는 헤더 +, 선택은 `App.selectedHostId` 갱신(에디터 툴바 드롭다운과 동기).
   - `HistoryList` (실행 기록; **클릭=에디터 로드, 더블클릭=재실행**, 삭제된 host는 표시만)
   - `SavedPanel` (폴더 트리; 쿼리 **클릭=로드/더블클릭=실행**·이름변경·삭제. 폴더 생성은 헤더 +)
-  - `SqlEditor` (`EditorTabs` 탭 스트립 + 툴바[연결 드롭다운·LIMIT 콤보박스+무제한 토글·**포맷**·저장·실행] + CodeMirror). CodeMirror 크롬은 `lib/cmTheme.ts`로 토큰화. ⌘↵ **현재 문장 실행** / ⌘S 저장 / ⇧⌘F 포맷.
-    - **문장 단위 실행(렌더러 측)**: `;`로 구분된 여러 문장 중 **커서(caret head)가 놓인 문장 하나만** 실행/기록한다(드래그 선택은 무시). `handleRun`이 `cmRef`(=`ReactCodeMirrorRef`)의 `view.state`에서 커서 문장 본문을 뽑아 `onRun(sql: string)`으로 올리고, `App.runQuery(sqlToRun)`가 그 문장으로 `runFresh`한다. → **main/ipc/history/client는 그대로**(단일 문장이면 `canPaginate`가 통과, `addHistory`가 그 문장만 저장).
+  - `SqlEditor` (`EditorTabs` 탭 스트립 + 툴바[연결 드롭다운·**포맷**·저장·실행 · LIMIT 없으면 "LIMIT 없음" 경고칩] + CodeMirror). CodeMirror 크롬은 `lib/cmTheme.ts`로 토큰화. ⌘↵ **현재 문장 실행** / ⌘S 저장 / ⇧⌘F 포맷.
+    - **문장 단위 실행(렌더러 측)**: `;`로 구분된 여러 문장 중 **커서(caret head)가 놓인 문장 하나만** 실행/기록한다(드래그 선택은 무시). `handleRun`이 `cmRef`(=`ReactCodeMirrorRef`)의 `view.state`에서 커서 문장 본문을 뽑아 `onRun(sql: string)`으로 올리고, `App.runQuery(sqlToRun)`가 그 문장으로 `runFresh`한다. → **main/ipc/history/client는 그대로**(그 문장만 재작성 없이 실행하고 `addHistory`가 저장).
     - **활성 문장 하이라이트**: `lib/cmActiveStatement.ts`(CodeMirror `StateField`)가 커서 문장 라인에 `.cm-stmt-active`(틸 워시 + 좌측 액센트 바)를 **항상** 칠해 실행 대상을 시각화.
     - **포맷**: `lib/formatSql.ts` = `sql-formatter`의 `format(sql, { language:'trino', tabWidth:2 })`(키워드 대소문자 **원본 유지**, 파싱 실패 시 원문 반환). 트랜잭션 dispatch라 undo 가능. `sql-formatter`는 렌더러 번들 대상이라 **devDependencies**.
     - 문장 분리는 `lib/sqlStatements.ts`의 토크나이저 `splitStatements`/`statementAtCursor`(문자열 `'…'`·식별자 `"…"`·`--`/`/* */` 주석 안의 `;`는 무시, `''`/`""` 이스케이프 처리) — 실행·하이라이트·인디케이터가 공유하는 순수 함수.
     - **Trino 자동완성**(`lib/trinoDialect.ts` + `lib/trinoWords.ts`): `sql()` 대신 `trino`(`SQLDialect.define` 기반 `LanguageSupport`)를 주입. 실제 서버 메타데이터가 아니라 **정적 Trino 키워드/타입/함수 목록**(`trinoWords.ts` — `sql-formatter`의 Trino 데이터에서 생성, **소문자 필수** = 토크나이저 하이라이팅 조건). 커스텀 완성 소스: 키워드/타입은 대문자·함수는 소문자 라벨, 상위 빈용 함수 `boost`, 함수는 **2글자↑**부터, `.`뒤·문자열·주석에서 억제, **자동 괄호 없음**(`current_date` 등 무괄호 함수 때문). 팝업 스타일·타입색 아이콘·틸 매칭 강조는 `cmTheme.ts`. 목록 재생성은 `scratchpad/gen-trino-words.mjs` 참고(출처 커밋 고정). **테이블/컬럼은 완성되지 않음**(범위 밖).
   - `EditorTabs` (멀티 탭 스트립 + 새 탭 `+`), `CloseTabDialog` (dirty 탭 닫기 3버튼 확인).
-  - `ResultsPane` (서브탭 **Results/Messages** + **타입 인지 그리드**[숫자 우정렬·타입 라벨·NULL·헤더/행번호 sticky] + **계기판 푸터**[◀ Page n ▶ · rows · time · scan · bytes]). 그리드는 **`@tanstack/react-virtual` 가상 스크롤**(div 기반, 열 너비는 상위 300행 샘플로 미리 고정, `scrollMargin=HEAD_H`로 sticky 헤더 보정) — 받은 행 전체를 스크롤로 본다(DOM에는 보이는 ~30행만). `orderByWarning` 배너.
+  - `ResultsPane` (서브탭 **Results/Messages** + **타입 인지 그리드**[숫자 우정렬·타입 라벨·NULL·헤더/행번호 sticky] + **계기판 푸터**[rows · time · scan · bytes]). 그리드는 **`@tanstack/react-virtual` 가상 스크롤**(div 기반, 열 너비는 상위 300행 샘플로 미리 고정, `scrollMargin=HEAD_H`로 sticky 헤더 보정) — 받은 행 **전체**를 스크롤로 본다(DOM에는 보이는 ~30행만). 서버 페이저 없음.
     - **결과 활용**(배치1): **정렬**(헤더 클릭 = 현재 페이지 클라이언트 정렬 asc→desc→해제, 타입 인지·NULL은 끝, `displayRows` useMemo), **복사**(셀 클릭 선택+⌘C, 우클릭 값/행/열 복사, 툴바 "복사"=전체 TSV → `api.copyToClipboard`), **내보내기**(툴바 "내보내기" → CSV/JSON, `api.saveTextFile`가 main `dialog.showSaveDialog`+`writeFile`), **셀 hover 툴팁**(잘린/중첩 값 전체 확인, `title`). 복사/저장은 상단 `.copy-flash` 토스트. 정렬은 페이지 이동/새 쿼리 시 초기화(시그니처 변경 시 `sort`/`sel` 리셋). 헤더 드래그(순서)와 클릭(정렬)이 공존.
-    - **실행 경험**(배치2): 실행 중 `.run-overlay`(라이브 **경과 타이머**[월클럭 100ms 틱] + **진행 stats**[state·scan rows·bytes, `tab.progress`←`query:progress` 스트림] + **인라인 중지**). 에러는 `.error-card`로 **구조화 표시**(`errorInfo` = errorName 배지·errorType·`line:col`·원문). `errorInfo.line`은 래핑(페이지네이션) 안 된 경우만 노출(ipc가 `paginate`면 숨김 — 원본과 어긋나므로). 탭에 `progress`/`errorInfo` 필드 추가.
+    - **실행 경험**(배치2): 실행 중 `.run-overlay`(라이브 **경과 타이머**[월클럭 100ms 틱] + **진행 stats**[state·scan rows·bytes, `tab.progress`←`query:progress` 스트림] + **인라인 중지**). 에러는 `.error-card`로 **구조화 표시**(`errorInfo` = errorName 배지·errorType·`line:col`·원문). `errorInfo.line`은 재작성이 없어 항상 원본과 일치하므로 노출. 탭에 `progress`/`errorInfo` 필드 추가.
     - **컬럼 조작**: 헤더 우측 가장자리 드래그로 **너비 조정**, 헤더 본문 드래그로 **순서 변경**, 우상단 **"열" 팝오버**(체크박스+초기화)로 **숨김/표시**, 헤더 **우클릭 컨텍스트 메뉴**(`.ctx-menu`, 마우스 위치 `fixed`)의 **"열 숨김"**으로 해당 열 즉시 숨김(바깥클릭·Esc·스크롤 시 닫힘). 상태는 `colState={sig, cols:ColConfig[]}`(각 `{origIndex,width,visible}`, 배열 순서=표시 순서)로 보관. **컬럼 시그니처**(이름+타입 목록)가 같으면 유지, 바뀌면 기본값 재구성 — 그래서 **같은 쿼리의 페이지 이동(동일 시그니처) 중에는 너비/순서/숨김이 유지**되고, 다른 모양의 새 쿼리면 초기화된다. header/body 모두 `visibleCols`를 `origIndex`로 렌더해 정렬 유지.
-    - **무제한 수신은 ipc에서 50,000행 안전 상한**(`UNLIMITED_CAP`)으로 보호 → 초과 시 `truncated`로 "안전 상한 도달, LIMIT 사용" 안내. 더 큰 데이터는 숫자 LIMIT 페이지네이션으로 접근.
-  - `StatusBar` (연결 라이브 점·이름·URL / rows·elapsed·page). 실행 중 점은 앰버 pulse.
+    - **모든 쿼리는 `SAFETY_CAP`(5만 행) 안전 상한**까지만 수신 → 초과 시 `truncated`로 "SQL에 LIMIT/WHERE로 좁혀 재실행" 안내(정렬 note도 "받은 행만 정렬"로 분기). 딥 페이징은 지원하지 않는다(서버 부하 회피 — 더 보려면 사용자가 SQL을 좁힌다).
+  - `StatusBar` (연결 라이브 점·이름·URL / rows·elapsed). 실행 중 점은 앰버 pulse.
   - `SaveQueryDialog` / `HostDialog` / `PromptDialog` / `ConfirmDialog` (모달). **주의: Electron은 `window.prompt` 미지원** → 이름 입력은 `PromptDialog`로. **네이티브 `window.confirm`/`alert`도 안 씀**(다크 테마와 이질적) → 삭제 확인은 `ConfirmDialog`(App의 `askConfirm(cfg)`), 경량 알림은 App **토스트**(`.app-toast`, `setToast`)로. 모든 모달은 `useEscClose` 훅 + `role="dialog"`/`aria-modal`.
     - **완성도**(배치3): 커스텀 확인/토스트, 모달 Esc·autoFocus·ARIA, StatusBar 상태점 정직화(실행중=앰버·오류=빨강·성공=초록·선택만=중립·미선택=회색)+`catalog.schema` 뱃지+"연결 선택 안 됨", `⌘1..9` 탭 전환(App 전역 keydown), 아이콘 일관화(⌫→`IconTrash`·▸▾→chevron·＋쿼리→`IconPlus`), 미저장 `●`는 탭 hover 중에도 유지, "제한하지 않음" 문구를 5만 행 상한과 정합.
   - `icons.tsx` (16px 스트로크 SVG 세트).
@@ -123,7 +120,7 @@ renderer (React)  ──IPC──▶  main process  ──HTTP──▶  Trino
 | `saved:createQuery` | `CreateQueryInput` → `SavedQuery` |
 | `saved:updateQuery` | `UpdateQueryInput` → `SavedQuery` |
 | `saved:deleteQuery` | `id` → void |
-| `settings:get` | → `AppSettings{rowLimit}` |
+| `settings:get` | → `AppSettings` (현재 빈 설정) |
 | `settings:update` | `Partial<AppSettings>` → `AppSettings` |
 | `clipboard:write` | `text` → void (OS 클립보드 복사) |
 | `file:saveText` | `SaveTextInput{defaultName,content}` → `SaveFileResult{saved,path?}` (저장 다이얼로그) |

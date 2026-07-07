@@ -3,10 +3,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { AppSettings } from '@shared/types'
 
-/** 앱 설정은 <userData>/settings.json 에 저장. */
-const DEFAULT_SETTINGS: AppSettings = {
-  rowLimit: 300
-}
+/** 앱 설정은 <userData>/settings.json 에 저장. 현재 사용자 설정 항목 없음(향후 확장용). */
+const DEFAULT_SETTINGS: AppSettings = {}
 
 function storePath(): string {
   return join(app.getPath('userData'), 'settings.json')

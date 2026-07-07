@@ -20,7 +20,6 @@ export interface EditorTab {
   requestId: string | null
   /** 실행 중 라이브 진행 stats(스트리밍) */
   progress: QueryStatsSummary | null
-  lastRun: { sql: string; hostId: string } | null
 }
 
 /** 워크스페이스 분할 단위. 각 pane = 독립 탭 그룹(자체 활성 탭). 분할 시 panes.length===2. */
@@ -54,8 +53,7 @@ export function makeScratch(seedSql: string, hostId: string | null, title: strin
     errorInfo: null,
     running: false,
     requestId: null,
-    progress: null,
-    lastRun: null
+    progress: null
   }
 }
 
@@ -75,8 +73,7 @@ export function makeBound(
     errorInfo: null,
     running: false,
     requestId: null,
-    progress: null,
-    lastRun: null
+    progress: null
   }
 }
 

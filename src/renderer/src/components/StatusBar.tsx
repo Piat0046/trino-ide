@@ -36,7 +36,6 @@ export function StatusBar({ selectedHost, running, result, error }: Props): JSX.
         <>
           <span>{result.rowCount.toLocaleString()} rows</span>
           <span>{fmtMs(result.stats?.elapsedMs)}</span>
-          {result.paginated && <span>page {result.page + 1}</span>}
         </>
       )}
     </footer>
