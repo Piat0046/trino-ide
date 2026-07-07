@@ -36,23 +36,20 @@ interface Props {
   onSelectHost: (id: string) => void
   /** 활성 host의 학습된 메타데이터(자동완성 소스가 읽음) */
   metadata: HostMetadata | null
-  // LIMIT (전역)
-  rowLimit: number | null
-  onRowLimitChange: (limit: number | null) => void
   // 세로 분할 토글(탭 스트립 우상단)
   split?: boolean
   onToggleSplit?: () => void
 }
 
-const NUMERIC_PRESETS = ['100', '300', '500', '1000', '5000', '10000']
-const FALLBACK_LIMIT = 300
-
-/** 대용량 스캔 힌트 문구(신호 조합별). 전송량(5만 행 상한)과 스캔 비용을 뭉뚱그리지 않는다. */
+/** LIMIT 미지정 경고 문구(심각도 등급별). LIMIT을 SQL에 쓰면 서버 pushdown으로 부하가 준다는 걸 앞세운다. */
 const SCAN_WARN_COPY: Record<Exclude<LargeScanRisk, null>, string> = {
   starNoWhere:
-    'SELECT *·WHERE 없이 무제한 모드로 실행하면 서버가 테이블 전체를 스캔합니다. LIMIT을 지정하거나 조회할 컬럼을 명시하세요. (전송은 5만 행 안전상한까지만 받지만, 그 전에 서버 스캔은 이미 끝나 있을 수 있어요.)',
-  noWhere: 'WHERE 없이 무제한 모드로 실행하면 서버가 테이블 전체를 스캔합니다. LIMIT을 지정하세요.',
-  star: 'SELECT *는 모든 컬럼을 가져옵니다. 무제한 모드에서는 필요한 컬럼만 명시하는 것을 권장합니다.'
+    'LIMIT·WHERE 없이 SELECT *를 실행하면 서버가 테이블 전체를 스캔·전송합니다. SQL에 LIMIT을 추가하거나 WHERE로 범위를 좁히고 필요한 컬럼만 명시하세요. (화면엔 5만 행 안전 상한까지만 받지만, 서버 부하는 그 전에 커질 수 있어요.)',
+  noWhere:
+    'LIMIT·WHERE 없이 실행하면 서버가 테이블 전체를 스캔합니다. SQL에 LIMIT을 추가하거나 WHERE로 범위를 좁히세요.',
+  star: 'LIMIT 없이 SELECT *를 실행하면 서버가 모든 컬럼을 전부 전송합니다. SQL에 LIMIT을 추가하거나 필요한 컬럼만 명시하세요.',
+  noLimit:
+    '이 문장에 LIMIT이 없어 서버가 조건에 맞는 행을 전부 계산·전송합니다. WHERE로 이미 좁혔다면 무시해도 되지만, SQL에 LIMIT을 추가하면 서버가 그만큼만 반환합니다.'
 }
 
 export function SqlEditor({
@@ -72,8 +69,6 @@ export function SqlEditor({
   hostId,
   onSelectHost,
   metadata,
-  rowLimit,
-  onRowLimitChange,
   split,
   onToggleSplit
 }: Props): JSX.Element {
@@ -88,12 +83,6 @@ export function SqlEditor({
     metaRef.current = { meta: metadata, defCatalog: host?.catalog, defSchema: host?.schema }
   }, [metadata, hostId, hosts])
   const trinoSupport = useMemo(() => makeTrino(() => metaRef.current), [])
-  const unlimited = rowLimit === null
-  const [limitText, setLimitText] = useState(unlimited ? String(FALLBACK_LIMIT) : String(rowLimit))
-
-  useEffect(() => {
-    if (rowLimit !== null) setLimitText(String(rowLimit))
-  }, [rowLimit])
 
   // 실행 대상(선택 우선, 없으면 커서 문장)을 추적 — 실행·대용량 경고·활성 하이라이트가 공유하는 단일 소스.
   const [runTarget, setRunTarget] = useState<RunTarget>({
@@ -120,7 +109,7 @@ export function SqlEditor({
     }
   }, [activeTabId])
   // 실행 불가(여러 문장 걸침) 상태에선 대용량 경고를 숨겨 모순 메시지를 피한다.
-  const scanRisk = runTarget.spansMultiple ? null : largeScanRisk(runTarget.text, rowLimit)
+  const scanRisk = runTarget.spansMultiple ? null : largeScanRisk(runTarget.text)
   const runTitle = runTarget.spansMultiple
     ? '선택 영역이 여러 문장에 걸쳐 있어 실행할 수 없어요 — 문장 하나만 선택하세요'
     : runTarget.mode === 'selection'
@@ -161,23 +150,6 @@ export function SqlEditor({
     }
   }
 
-  const handleLimitInput = (value: string): void => {
-    setLimitText(value)
-    const n = parseInt(value, 10)
-    if (Number.isFinite(n) && n > 0) onRowLimitChange(n)
-  }
-  const handleLimitBlur = (): void => {
-    const n = parseInt(limitText, 10)
-    if (!(Number.isFinite(n) && n > 0)) setLimitText(unlimited ? limitText : String(rowLimit))
-  }
-  const handleToggleUnlimited = (checked: boolean): void => {
-    if (checked) onRowLimitChange(null)
-    else {
-      const n = parseInt(limitText, 10)
-      onRowLimitChange(Number.isFinite(n) && n > 0 ? n : FALLBACK_LIMIT)
-    }
-  }
-
   return (
     <div className={'editor-pane' + (split ? ' compact' : '')} onKeyDown={handleKeyDown}>
       <EditorTabs
@@ -211,42 +183,16 @@ export function SqlEditor({
         {scanRisk && (
           <span
             className="scan-warn"
+            role="note"
             title={SCAN_WARN_COPY[scanRisk]}
             aria-label={SCAN_WARN_COPY[scanRisk]}
           >
             <IconAlertTriangle size={13} />
-            <span className="btn-label">대용량 위험</span>
+            <span className="btn-label">LIMIT 없음</span>
           </span>
         )}
 
         <span className="spacer" />
-
-        <div className="limit-control">
-          <span className="limit-label">LIMIT</span>
-          <input
-            type="text"
-            className="limit-input"
-            list="limit-presets"
-            value={unlimited ? '' : limitText}
-            placeholder={unlimited ? '제한 없음' : ''}
-            disabled={unlimited}
-            onChange={(e) => handleLimitInput(e.target.value)}
-            onBlur={handleLimitBlur}
-          />
-          <datalist id="limit-presets">
-            {NUMERIC_PRESETS.map((p) => (
-              <option key={p} value={p} />
-            ))}
-          </datalist>
-          <label className="limit-unlimited" title="LIMIT 없이 받되 안전상 최대 5만 행까지 표시">
-            <input
-              type="checkbox"
-              checked={unlimited}
-              onChange={(e) => handleToggleUnlimited(e.target.checked)}
-            />
-            <span className="limit-unlimited-text">제한하지 않음</span>
-          </label>
-        </div>
 
         <button onClick={handleFormat} disabled={!sqlText.trim()} title="포맷 (⇧⌘F)">
           <IconFormat size={14} />

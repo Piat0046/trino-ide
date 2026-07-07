@@ -71,7 +71,6 @@ export default function App(): JSX.Element {
   const [confirmState, setConfirmState] = useState<ConfirmConfig | null>(null)
   const [toast, setToast] = useState<string | null>(null)
   const askConfirm = (cfg: ConfirmConfig): void => setConfirmState(cfg)
-  const [rowLimit, setRowLimit] = useState<number | null>(300)
   // host별 학습된 메타데이터 캐시(자동완성/관리 섹션 공용). 지연 로드.
   const [metadata, setMetadata] = useState<Record<string, HostMetadata>>({})
   // 관리 섹션이 보여줄 host(미선택이면 활성 탭 host를 따른다)
@@ -172,7 +171,6 @@ export default function App(): JSX.Element {
     void refreshHosts()
     void refreshHistory()
     void refreshSaved()
-    void api.getSettings().then((s) => setRowLimit(s.rowLimit))
   }, [refreshHosts, refreshHistory, refreshSaved])
 
   // 첫 pane을 포커스로 초기화(이후 #4에서 pane 내부 상호작용이 갱신)
@@ -260,11 +258,6 @@ export default function App(): JSX.Element {
       }))
     )
   }, [library])
-
-  const changeRowLimit = (limit: number | null): void => {
-    setRowLimit(limit)
-    void api.updateSettings({ rowLimit: limit })
-  }
 
   // ----- host CRUD -----
   const openAdd = (): void => {
@@ -358,34 +351,26 @@ export default function App(): JSX.Element {
   }
 
   // ----- query execution (탭별) -----
-  const executeQuery = async (
-    tabId: string,
-    sqlText: string,
-    hostId: string,
-    page: number,
-    recordHistory: boolean
-  ): Promise<void> => {
+  const executeQuery = async (tabId: string, sqlText: string, hostId: string): Promise<void> => {
     const id = crypto.randomUUID()
     updateTab(tabId, { running: true, requestId: id, error: null, errorInfo: null, progress: null })
     try {
-      const res = await api.runQuery({ hostId, sql: sqlText, requestId: id, rowLimit, page, recordHistory })
+      const res = await api.runQuery({ hostId, sql: sqlText, requestId: id })
       if (res.ok) {
         updateTab(tabId, { result: res.value, error: null, errorInfo: null })
-        // 성공 실행(페이지 이동 재실행 제외) 후 학습된 메타데이터 갱신
-        if (recordHistory) void refreshMetadata(hostId)
+        void refreshMetadata(hostId)
       } else updateTab(tabId, { error: res.error, errorInfo: res.errorInfo ?? null, result: null })
     } catch (e) {
       updateTab(tabId, { error: e instanceof Error ? e.message : String(e), result: null })
     } finally {
       updateTab(tabId, { running: false, requestId: null, progress: null })
-      if (recordHistory) void refreshHistory()
+      void refreshHistory()
     }
   }
 
   const runFresh = (tabId: string, sqlText: string, hostId: string): void => {
     const doExecute = (): void => {
-      updateTab(tabId, { lastRun: { sql: sqlText, hostId } })
-      void executeQuery(tabId, sqlText, hostId, 0, true)
+      void executeQuery(tabId, sqlText, hostId)
     }
     // prod로 지정 + 옵트인한 연결이면 실행 전 확인(로컬 host.env 조회만 — 서버 호출 없음)
     const host = hosts.find((h) => h.id === hostId)
@@ -426,11 +411,6 @@ export default function App(): JSX.Element {
   const cancelInPane = (paneId: string): void => {
     const t = paneOf(paneId) && activeTabOf(paneOf(paneId)!)
     if (t?.requestId) void api.cancelQuery(t.requestId)
-  }
-  const goToPageInPane = (paneId: string, page: number): void => {
-    const t = paneOf(paneId) && activeTabOf(paneOf(paneId)!)
-    if (!t?.lastRun || page < 0) return
-    void executeQuery(t.id, t.lastRun.sql, t.lastRun.hostId, page, false)
   }
   const saveInPane = (paneId: string): void => {
     setFocusedPaneId(paneId)
@@ -894,8 +874,6 @@ export default function App(): JSX.Element {
           hostId={pa?.hostId ?? null}
           onSelectHost={(id) => selectHostInPane(pane.id, id)}
           metadata={metadata[pa?.hostId ?? ''] ?? null}
-          rowLimit={rowLimit}
-          onRowLimitChange={changeRowLimit}
           split={split}
           onToggleSplit={toggleSplit}
         />
@@ -906,8 +884,6 @@ export default function App(): JSX.Element {
           running={pa?.running ?? false}
           progress={pa?.progress ?? null}
           onCancel={() => cancelInPane(pane.id)}
-          onPrevPage={() => pa?.result && goToPageInPane(pane.id, pa.result.page - 1)}
-          onNextPage={() => pa?.result && goToPageInPane(pane.id, pa.result.page + 1)}
         />
       </div>
     )

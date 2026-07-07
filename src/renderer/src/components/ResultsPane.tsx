@@ -30,8 +30,6 @@ interface Props {
   running: boolean
   progress: QueryStatsSummary | null
   onCancel: () => void
-  onPrevPage: () => void
-  onNextPage: () => void
 }
 
 const HEAD_H = 42
@@ -129,9 +127,7 @@ export function ResultsPane({
   errorInfo,
   running,
   progress,
-  onCancel,
-  onPrevPage,
-  onNextPage
+  onCancel
 }: Props): JSX.Element {
   const [tab, setTab] = useState<'results' | 'messages'>('results')
   const parentRef = useRef<HTMLDivElement>(null)
@@ -443,7 +439,7 @@ export function ResultsPane({
 
   const template = `${ROWNUM_W}px ${visibleCols.map((c) => `${c.width}px`).join(' ')}`
   const totalWidth = ROWNUM_W + visibleCols.reduce((a, c) => a + c.width, 0)
-  const baseIndex = sort ? 0 : result?.paginated ? result.page * (result.pageSize ?? 0) : 0
+  const baseIndex = 0 // 전체 결과가 메모리에 있으므로 행번호는 항상 1..N
   const stats = result?.stats
   // FINISHED가 아니면(truncated/취소로 잠정) 통계가 미확정 — 배너 + 값 흐리게로 신호
   const finished = !stats || stats.state === 'FINISHED'
@@ -690,7 +686,6 @@ export function ResultsPane({
               <div className="msg-keyrow">
                 <span>
                   <b>{result.rowCount.toLocaleString()}</b> rows
-                  {result.paginated ? ` · page ${result.page + 1}` : ''}
                 </span>
                 {stats?.elapsedMs != null && (
                   <span>
@@ -828,11 +823,6 @@ export function ResultsPane({
           </div>
         ) : (
           <>
-            {result.orderByWarning && (
-              <div className="warn-banner">
-                ⚠ ORDER BY가 없어 페이지 간 행 순서가 일정하지 않을 수 있습니다.
-              </div>
-            )}
             <div className="grid-wrap" ref={parentRef} tabIndex={0} onKeyDown={onGridKey}>
               <div className="grid2" style={{ width: totalWidth, minWidth: '100%' }}>
                 <div className="grid2-head" style={{ gridTemplateColumns: template, height: HEAD_H }}>
@@ -1006,24 +996,19 @@ export function ResultsPane({
               ⚠ {result.warnings.length}
             </span>
           )}
-          {result.paginated && (
-            <div className="pager">
-              <button onClick={onPrevPage} disabled={result.page === 0} title="이전 페이지">
-                <IconChevronLeft size={14} />
-              </button>
-              <span className="page-label">Page {result.page + 1}</span>
-              <button onClick={onNextPage} disabled={!result.hasNext} title="다음 페이지">
-                <IconChevronRight size={14} />
-              </button>
-            </div>
-          )}
           <span className="stat">
-            <b>{result.rowCount.toLocaleString()}</b> rows{result.paginated ? ' / page' : ''}
+            <b>{result.rowCount.toLocaleString()}</b> {result.truncated ? 'rows (상한)' : 'rows'}
           </span>
-          {sort && <span className="stat sort-note">현재 페이지 정렬</span>}
+          {sort && (
+            <span className="stat sort-note">{result.truncated ? '받은 행만 정렬' : '정렬됨'}</span>
+          )}
           {result.truncated && (
-            <span className="stat" style={{ color: 'var(--warn)' }}>
-              안전 상한 도달 — 더 보려면 LIMIT에 숫자를 넣어 페이지로 나눠 보세요
+            <span
+              className="stat"
+              style={{ color: 'var(--warn)' }}
+              title="5만 행 안전 상한에서 멈췄습니다 — SQL에 LIMIT을 추가하거나 WHERE로 범위를 좁혀 다시 실행하세요"
+            >
+              ⚠ 5만 행에서 멈춤 — LIMIT/WHERE로 좁혀 재실행
             </span>
           )}
           {stats?.elapsedMs != null && (

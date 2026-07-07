@@ -24,8 +24,8 @@ function flattenStages(stage: RawStage | undefined, depth = 0, out: StageSummary
   return out
 }
 
-/** rowLimit 미지정 시 사용할 기본 수신 상한. */
-const DEFAULT_ROW_LIMIT = 300
+/** 모든 쿼리의 메모리 보호 안전 상한(행). 초과분은 받지 않고 서버 쿼리를 취소한다. */
+export const SAFETY_CAP = 50_000
 
 /** 비밀번호까지 복호화가 끝난, Trino 접속에 필요한 모든 값 */
 export interface ResolvedConn {
@@ -106,8 +106,8 @@ export async function runQuery(
   conn: ResolvedConn,
   sql: string,
   token: CancelToken,
-  /** 받을 행 상한. null이면 무제한. undefined면 기본값 사용 */
-  rowLimit: number | null = DEFAULT_ROW_LIMIT,
+  /** 받을 행 상한(메모리 보호). 도달 시 서버 쿼리를 취소하고 truncated 표시. */
+  rowLimit: number = SAFETY_CAP,
   /** 페이지마다 진행 stats를 흘려보낸다(라이브 피드백용) */
   onProgress?: (stats: QueryStatsSummary) => void
 ): Promise<QueryResultPayload> {
@@ -145,7 +145,7 @@ export async function runQuery(
     }
     if (page.data) {
       for (const row of page.data as unknown[][]) {
-        if (rowLimit != null && rows.length >= rowLimit) {
+        if (rows.length >= rowLimit) {
           truncated = true
           break
         }
@@ -173,127 +173,11 @@ export async function runQuery(
     rowCount: rows.length,
     truncated,
     stats: finalStats,
-    // 페이지네이션 메타는 ipc 레이어에서 채운다(기본: 비페이지네이션)
-    paginated: false,
-    page: 0,
-    pageSize: null,
-    hasNext: false,
-    orderByWarning: false,
     executedSql: sql,
     warnings: warnings.length ? warnings : undefined,
     infoUri,
     queryId: token.trinoQueryId
   }
-}
-
-/** 끝의 세미콜론과 그 뒤 줄주석/공백을 제거 */
-function stripTrailing(sql: string): string {
-  return sql.trim().replace(/;\s*(--[^\n]*)?\s*$/, '')
-}
-
-/** 선행 공백/주석(줄·블록)을 반복 제거 */
-function stripLeadingComments(s: string): string {
-  let prev: string
-  let cur = s
-  do {
-    prev = cur
-    cur = cur.replace(/^\s+/, '')
-    cur = cur.replace(/^--[^\n]*\n?/, '') // 줄 주석
-    cur = cur.replace(/^\/\*[\s\S]*?\*\//, '') // 블록 주석
-  } while (cur !== prev)
-  return cur
-}
-
-/**
- * SELECT/WITH 단일 문이면 OFFSET/LIMIT 래핑이 가능.
- * 선행 주석(-- , /* *​/)·선행 괄호·끝 주석을 견딘다.
- */
-export function canPaginate(sql: string): boolean {
-  const s = stripTrailing(sql)
-  if (!s) return false
-  if (s.includes(';')) return false // 다중 문은 제외(안전상)
-  const head = stripLeadingComments(s).replace(/^\(+\s*/, '')
-  return /^(select|with)\b/i.test(head)
-}
-
-/**
- * 최상위(괄호 깊이 0, 문자열/식별자/주석 밖) LIMIT/OFFSET/FETCH 절이 있는지.
- * 서브쿼리 안의 LIMIT이나 문자열/주석 속 단어에 오판하지 않도록 스캔한다.
- */
-export function hasOwnLimitOffset(sql: string): boolean {
-  let depth = 0
-  const n = sql.length
-  for (let i = 0; i < n; ) {
-    const ch = sql[i]
-    if (ch === '-' && sql[i + 1] === '-') {
-      i += 2
-      while (i < n && sql[i] !== '\n') i++
-      continue
-    }
-    if (ch === '/' && sql[i + 1] === '*') {
-      i += 2
-      while (i < n && !(sql[i] === '*' && sql[i + 1] === '/')) i++
-      i += 2
-      continue
-    }
-    if (ch === "'" || ch === '"') {
-      const q = ch
-      i++
-      while (i < n) {
-        if (sql[i] === q) {
-          if (sql[i + 1] === q) {
-            i += 2 // '' / "" 이스케이프
-            continue
-          }
-          i++
-          break
-        }
-        i++
-      }
-      continue
-    }
-    if (ch === '(') {
-      depth++
-      i++
-      continue
-    }
-    if (ch === ')') {
-      if (depth > 0) depth--
-      i++
-      continue
-    }
-    if (/[A-Za-z_]/.test(ch)) {
-      let j = i + 1
-      while (j < n && /[A-Za-z0-9_]/.test(sql[j])) j++
-      if (depth === 0) {
-        const w = sql.slice(i, j).toLowerCase()
-        if (w === 'limit' || w === 'offset' || w === 'fetch') return true
-      }
-      i = j
-      continue
-    }
-    i++
-  }
-  return false
-}
-
-/**
- * 원본 쿼리에 OFFSET/LIMIT 페이지네이션 부여.
- * - 자체 최상위 LIMIT/OFFSET/FETCH가 없으면: 원본 끝에 덧붙인다(최상위 ORDER BY 보존).
- * - 있으면: 덧붙이면 문법 충돌 → 서브쿼리로 감싼다(안쪽 ORDER BY는 보존 안 될 수 있음).
- */
-export function wrapPaginated(sql: string, offset: number, limit: number): string {
-  const inner = stripTrailing(sql)
-  // 두 경로 모두 inner와 OFFSET을 줄바꿈으로 분리해 inner 끝의 줄주석(--)이 삼키지 않게 함
-  if (!hasOwnLimitOffset(inner)) {
-    return `${inner}\nOFFSET ${offset} LIMIT ${limit}`
-  }
-  return `SELECT * FROM (\n${inner}\n) AS _trino_ide_page\nOFFSET ${offset} LIMIT ${limit}`
-}
-
-/** 원본 쿼리에 ORDER BY가 보이는지(대략) — 없으면 페이지 순서 경고 */
-export function hasOrderBy(sql: string): boolean {
-  return /\border\s+by\b/i.test(sql)
 }
 
 export async function cancelQuery(conn: ResolvedConn, trinoQueryId: string): Promise<void> {

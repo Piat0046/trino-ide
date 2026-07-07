@@ -41,11 +41,9 @@ import {
   type CancelToken,
   type ResolvedConn,
   TrinoQueryError,
-  canPaginate,
   cancelQuery,
-  hasOrderBy,
   runQuery,
-  wrapPaginated
+  SAFETY_CAP
 } from './trino/client'
 import type { QueryErrorInfo } from '@shared/types'
 
@@ -117,37 +115,12 @@ export function registerIpcHandlers(): void {
       const onProgress = (stats: QueryResultPayload['stats']): void => {
         if (stats) event.sender.send('query:progress', { requestId: req.requestId, stats })
       }
-      // 요청에 rowLimit이 오면 그 값을, 없으면 저장된 기본 설정을 사용
-      const rowLimit = req.rowLimit !== undefined ? req.rowLimit : getSettings().rowLimit
-      const page = req.page ?? 0
       const recordHistory = req.recordHistory ?? true
 
-      // 페이지네이션: rowLimit이 숫자이고 SELECT/WITH 단일 문일 때만 OFFSET/LIMIT 래핑
-      const paginate = typeof rowLimit === 'number' && rowLimit > 0 && canPaginate(req.sql)
-      // 무제한(null)이어도 메모리 보호를 위해 안전 상한까지만 받는다
-      const UNLIMITED_CAP = 50_000
-      const cap = rowLimit == null ? UNLIMITED_CAP : rowLimit
-      // 다음 페이지 존재 판단을 위해 1행 더 받아본다
-      const execSql = paginate ? wrapPaginated(req.sql, page * rowLimit, rowLimit + 1) : req.sql
-      const fetchCap = paginate ? rowLimit + 1 : cap
-
+      // SQL을 재작성하지 않는다 — 원본을 그대로 1회 실행. 메모리 보호를 위해 SAFETY_CAP까지만
+      // 수신 후 서버 쿼리를 취소한다(OFFSET 페이지 재실행·서브쿼리 래핑 없음).
       try {
-        const value = await runQuery(conn, execSql, token, fetchCap, onProgress)
-
-        if (paginate) {
-          const limit = rowLimit as number
-          const hasNext = value.rows.length > limit
-          if (hasNext) value.rows = value.rows.slice(0, limit)
-          value.rowCount = value.rows.length
-          value.truncated = false
-          value.paginated = true
-          value.page = page
-          value.pageSize = limit
-          value.hasNext = hasNext
-          value.orderByWarning = !hasOrderBy(req.sql)
-        } else {
-          value.pageSize = typeof rowLimit === 'number' ? rowLimit : null
-        }
+        const value = await runQuery(conn, req.sql, token, SAFETY_CAP, onProgress)
 
         if (recordHistory) {
           addHistory({
@@ -174,9 +147,9 @@ export function registerIpcHandlers(): void {
             errorName: e.errorName,
             errorType: e.errorType,
             errorCode: e.errorCode,
-            // 래핑(페이지네이션)된 SQL이면 line/column이 원본과 어긋나므로 숨긴다
-            line: paginate ? undefined : e.line,
-            column: paginate ? undefined : e.column
+            // 재작성이 없으므로 line/column이 항상 원본과 일치
+            line: e.line,
+            column: e.column
           }
         }
         if (recordHistory) {

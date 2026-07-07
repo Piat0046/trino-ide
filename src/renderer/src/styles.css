@@ -771,40 +771,7 @@ select {
   align-items: center;
   gap: 6px;
 }
-.limit-control {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  padding-left: 4px;
-}
-.limit-label {
-  font-family: var(--mono);
-  font-size: 10px;
-  letter-spacing: 0.06em;
-  color: var(--text-2);
-}
-.limit-input {
-  width: 78px;
-  font-family: var(--mono);
-}
-.limit-input:disabled {
-  opacity: 0.45;
-}
-.limit-unlimited {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  cursor: pointer;
-  color: var(--text-2);
-  white-space: nowrap;
-  font-size: 11px;
-}
-.limit-unlimited input {
-  width: auto;
-}
-
-/* 대용량 조회 경고 칩(비차단 자문 — 실행을 막지 않음). 앰버 신호, 에러(danger)와 구분 */
+/* LIMIT 미지정 경고 칩(비차단 자문 — 실행을 막지 않음). 앰버 신호, 에러(danger)와 구분 */
 .scan-warn {
   display: inline-flex;
   align-items: center;
@@ -825,9 +792,7 @@ select {
   gap: 6px;
   padding: 8px 10px;
 }
-.editor-pane.compact .toolbar .btn-label,
-.editor-pane.compact .toolbar .limit-unlimited-text,
-.editor-pane.compact .toolbar .limit-label {
+.editor-pane.compact .toolbar .btn-label {
   display: none;
 }
 .editor-pane.compact .toolbar button {
@@ -837,9 +802,6 @@ select {
   width: auto;
   min-width: 88px;
   flex: 0 1 190px;
-}
-.editor-pane.compact .toolbar .limit-input {
-  width: 56px;
 }
 
 .cm-host {
@@ -1728,23 +1690,6 @@ body.col-resizing * {
   font-size: 11px;
   color: var(--text-2);
   flex-shrink: 0;
-}
-.pager {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-.pager button {
-  width: 24px;
-  height: 22px;
-  padding: 0;
-  display: grid;
-  place-items: center;
-}
-.pager .page-label {
-  min-width: 64px;
-  text-align: center;
-  color: var(--text-1);
 }
 .stat {
   display: inline-flex;
