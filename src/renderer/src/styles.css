@@ -119,6 +119,7 @@ button.ghost:hover:not(:disabled) {
 input[type='text'],
 input[type='password'],
 input[type='number'],
+input[type='date'],
 input:not([type]),
 select {
   font-family: inherit;
@@ -1442,6 +1443,168 @@ select {
   color: var(--warn);
   background: var(--warn-dim);
   border-bottom: 1px solid var(--border);
+}
+
+/* 쿼리 파라미터 인라인 바(#34) — 에디터↔결과 사이 상주. 값만 바꿔 ⌘↵ 반복 실행 */
+.param-bar {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg-1);
+  border-top: 1px solid var(--border);
+  max-height: 40%;
+  overflow-y: auto;
+}
+.param-bar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.param-count {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--meta);
+  text-transform: uppercase;
+}
+.param-preview-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px;
+  background: transparent;
+  border: none;
+  color: var(--text-2);
+  font-size: 11px;
+  cursor: pointer;
+  width: auto;
+}
+.param-preview-toggle:hover {
+  color: var(--text-1);
+}
+.param-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+}
+.param-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.param-label {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-2);
+  white-space: nowrap;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.param-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.param-input {
+  min-width: 120px;
+}
+/* base input[type=…] 셀렉터(width:100%)보다 특이도를 높여 인라인 폭 유지 */
+.param-bar input.param-input,
+.param-bar input.param-chip-input {
+  width: auto;
+}
+.param-input.param-date {
+  min-width: 130px;
+  color-scheme: dark; /* 네이티브 날짜 팝업을 다크로 */
+}
+.param-range-sep {
+  color: var(--text-2);
+}
+.param-field.invalid .param-input {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 2px var(--danger-dim);
+}
+.param-hint {
+  font-size: 10px;
+  color: var(--danger);
+  white-space: nowrap;
+}
+/* multi-select 칩 입력 */
+.param-multi {
+  min-width: 160px;
+  padding: 2px 4px;
+  background: var(--bg-0);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+}
+.param-field.invalid .param-multi {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 2px var(--danger-dim);
+}
+.param-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 7px;
+  background: var(--meta-dim);
+  color: var(--text-0);
+  border-radius: var(--r-sm);
+  font-size: 11px;
+}
+.param-chip-text {
+  font-family: var(--mono);
+}
+.param-chip-x {
+  display: inline-flex;
+  padding: 0;
+  width: auto;
+  background: transparent;
+  border: none;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.param-chip-x:hover {
+  color: var(--danger);
+}
+.param-chip-input {
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  padding: 3px 4px;
+  min-width: 90px;
+  width: auto;
+  flex: 1;
+}
+.param-chip-input:focus {
+  outline: none;
+  border: none;
+  box-shadow: none;
+}
+.param-sql-preview {
+  margin: 0;
+  padding: 8px 10px;
+  background: var(--bg-0);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-1);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 120px;
+  overflow-y: auto;
+}
+/* 에디터 안 {{param}} 토큰 강조 */
+.cm-param {
+  background: var(--meta-dim);
+  color: var(--meta);
+  border-radius: 2px;
 }
 
 /* 데이터 그리드 (가상 스크롤, div 기반) */

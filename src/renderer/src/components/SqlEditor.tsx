@@ -9,8 +9,22 @@ import { makeTrino, type CompletionMeta } from '../lib/trinoDialect'
 import { resolveRunTarget, type RunTarget } from '../lib/sqlStatements'
 import { largeScanRisk, type LargeScanRisk } from '../lib/largeScan'
 import { formatSql } from '../lib/formatSql'
+import {
+  scanParams,
+  applyParams,
+  paramsReady,
+  type ParamValue
+} from '../lib/queryParams'
+import { paramHighlight } from '../lib/cmParams'
+
+/** 파라미터 값 슬롯(owner = 저장쿼리id 또는 스크래치 마커 — 탭 재사용 시 오염 방지). */
+interface ParamSlot {
+  owner: string
+  values: Record<string, ParamValue>
+}
 import { IconAlertTriangle, IconFormat, IconPlay, IconSave, IconStop } from './icons'
 import { EditorTabs, type TabView } from './EditorTabs'
+import { ParamBar } from './ParamBar'
 import { EnvBadge, envColor } from './EnvBadge'
 
 interface Props {
@@ -30,6 +44,10 @@ interface Props {
   running: boolean
   /** 활성 탭이 미저장 스크래치인지 (저장 버튼 의미 분기) */
   isScratch: boolean
+  /** 바인딩된 저장 쿼리 id(파라미터 값 localStorage 영속 키). 스크래치면 null */
+  savedQueryId: string | null
+  /** 경량 알림(토스트) */
+  onNotify?: (msg: string) => void
   // connection (활성 탭에 귀속)
   hosts: HostConfig[]
   hostId: string | null
@@ -65,6 +83,8 @@ export function SqlEditor({
   onSave,
   running,
   isScratch,
+  savedQueryId,
+  onNotify,
   hosts,
   hostId,
   onSelectHost,
@@ -73,6 +93,7 @@ export function SqlEditor({
   onToggleSplit
 }: Props): JSX.Element {
   const cmRef = useRef<ReactCodeMirrorRef>(null)
+  const editorPaneRef = useRef<HTMLDivElement>(null)
   const currentHost = hosts.find((h) => h.id === hostId) ?? null
   const envSignal = envColor(currentHost?.env)
 
@@ -116,6 +137,64 @@ export function SqlEditor({
       ? '선택 영역 실행 (⌘↵)'
       : '현재 문장 실행 (⌘↵)'
 
+  // ----- 쿼리 파라미터({{name}}) -----
+  // 값은 탭별 세션 메모리 + 저장쿼리는 localStorage로 프리필. 순수 렌더러(서버 왕복 0).
+  // 슬롯마다 owner(=저장쿼리id 또는 스크래치 마커)를 달아, #42 탭 재사용으로 같은 tabId에
+  // 다른 쿼리가 들어오면 owner 불일치로 재로딩한다(잔여값 오염 방지).
+  const paramDefs = useMemo(
+    () => (runTarget.spansMultiple ? [] : scanParams(runTarget.text)),
+    [runTarget.text, runTarget.spansMultiple]
+  )
+  const paramOwner = savedQueryId ?? 'scratch:' + activeTabId
+  const [paramStore, setParamStore] = useState<Record<string, ParamSlot>>({})
+  // ref 미러 — ⌘↵가 같은 이벤트에서 방금 커밋된 값을 stale 없이 읽도록(멀티 칩 draft 포함)
+  const storeRef = useRef(paramStore)
+  const writeStore = (next: Record<string, ParamSlot>): void => {
+    storeRef.current = next
+    setParamStore(next)
+  }
+  const activeSlot = paramStore[activeTabId]
+  const paramValues = activeSlot && activeSlot.owner === paramOwner ? activeSlot.values : {}
+
+  // owner가 바뀌면(다른 저장쿼리/스크래치가 이 슬롯을 차지) 그 owner의 저장값으로 재로딩
+  useEffect(() => {
+    const cur = storeRef.current[activeTabId]
+    if (cur && cur.owner === paramOwner) return
+    let values: Record<string, ParamValue> = {}
+    if (savedQueryId) {
+      try {
+        const raw = localStorage.getItem('param:' + savedQueryId)
+        if (raw) values = JSON.parse(raw)
+      } catch {
+        /* ignore */
+      }
+    }
+    writeStore({ ...storeRef.current, [activeTabId]: { owner: paramOwner, values } })
+  }, [activeTabId, savedQueryId, paramOwner])
+
+  const setParam = (key: string, value: ParamValue): void => {
+    const cur = storeRef.current[activeTabId]
+    const base = cur && cur.owner === paramOwner ? cur.values : {}
+    const values = { ...base, [key]: value }
+    writeStore({ ...storeRef.current, [activeTabId]: { owner: paramOwner, values } })
+    if (savedQueryId) {
+      try {
+        localStorage.setItem('param:' + savedQueryId, JSON.stringify(values))
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  const compiledPreview = useMemo(
+    () => (paramDefs.length ? applyParams(runTarget.text, paramValues) : runTarget.text),
+    [paramDefs.length, runTarget.text, paramValues]
+  )
+
+  // 빈 필수 필드는 실행이 한 번 차단된 뒤에만 빨강으로(공격적 pristine 빨강 방지)
+  const [paramErrors, setParamErrors] = useState(false)
+  useEffect(() => setParamErrors(false), [runTarget.text, activeTabId])
+
   const handleRun = (): void => {
     if (running || !hostId) return
     const view = cmRef.current?.view
@@ -125,6 +204,25 @@ export function SqlEditor({
     const head = view ? view.state.selection.main.head : 0
     const target = resolveRunTarget(doc, from, to, head)
     if (target.spansMultiple || !target.text.trim()) return
+    const defs = scanParams(target.text)
+    if (defs.length) {
+      const cur = storeRef.current[activeTabId]
+      const vals = cur && cur.owner === paramOwner ? cur.values : {}
+      if (!paramsReady(defs, vals)) {
+        setParamErrors(true)
+        onNotify?.('매개변수 값을 먼저 채우세요')
+        requestAnimationFrame(() => {
+          editorPaneRef.current
+            ?.querySelector<HTMLElement>(
+              '.param-field.invalid input, .param-field.invalid .param-chip-input'
+            )
+            ?.focus()
+        })
+        return
+      }
+      onRun(applyParams(target.text, vals))
+      return
+    }
     onRun(target.text)
   }
 
@@ -151,7 +249,11 @@ export function SqlEditor({
   }
 
   return (
-    <div className={'editor-pane' + (split ? ' compact' : '')} onKeyDown={handleKeyDown}>
+    <div
+      className={'editor-pane' + (split ? ' compact' : '')}
+      onKeyDown={handleKeyDown}
+      ref={editorPaneRef}
+    >
       <EditorTabs
         tabs={tabs}
         activeTabId={activeTabId}
@@ -238,12 +340,24 @@ export function SqlEditor({
             trinoSupport,
             cmTheme,
             activeStatement,
+            paramHighlight,
             runTargetListener,
             autocompletion({ activateOnTyping: true, selectOnOpen: false })
           ]}
           onChange={onChange}
         />
       </div>
+
+      {paramDefs.length > 0 && (
+        <ParamBar
+          defs={paramDefs}
+          values={paramValues}
+          onChange={setParam}
+          disabled={running}
+          showErrors={paramErrors}
+          previewSql={compiledPreview}
+        />
+      )}
     </div>
   )
 }
