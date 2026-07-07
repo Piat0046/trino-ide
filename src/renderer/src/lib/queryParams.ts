@@ -7,14 +7,15 @@
 // - {{snippet:…}} 는 F26(스니펫)용으로 예약 — 파라미터로 잡지 않는다.
 // - 타입: text(기본)/number/date/multi. date-range는 {{name.start}}+{{name.end}} 접미 규약으로 묶는다.
 
-export type ParamType = 'text' | 'number' | 'date' | 'multi'
+// raw = 따옴표 없이 값을 그대로 삽입(식별자·동적 테이블/스키마명 보간용 이스케이프 해치).
+export type ParamType = 'text' | 'number' | 'date' | 'multi' | 'raw'
 
 /** 스캔으로 얻는 파라미터 정의. date-range는 kind='range'로 base 이름 하나에 묶인다. */
 export interface ParamDef {
   /** 위젯/값맵 키. 일반=파라미터 이름, range=base 이름 */
   key: string
   /** 위젯 종류 */
-  kind: 'text' | 'number' | 'date' | 'multi' | 'range'
+  kind: 'text' | 'number' | 'date' | 'multi' | 'range' | 'raw'
   /** 원문에 등장한 raw 토큰명(치환 매칭용). range는 base(`x`), 실제 토큰은 x.start/x.end */
   raw: string
 }
@@ -90,7 +91,7 @@ export function paramRanges(sql: string): Array<{ from: number; to: number }> {
 }
 
 function normalizeType(t?: string): ParamType {
-  if (t === 'number' || t === 'date' || t === 'multi') return t
+  if (t === 'number' || t === 'date' || t === 'multi' || t === 'raw') return t
   return 'text' // 미지정·미지원 타입은 text로 폴백
 }
 
@@ -163,7 +164,7 @@ export function paramValueValid(def: ParamDef, val: ParamValue | undefined): boo
     case 'range':
       if (!val || typeof val !== 'object' || Array.isArray(val)) return false
       return val.start !== '' && val.end !== '' && val.start <= val.end
-    default:
+    default: // text, raw
       return typeof val === 'string' && val.trim() !== ''
   }
 }
@@ -188,6 +189,8 @@ function compileValue(def: ParamDef, val: ParamValue | undefined): string {
       const arr = Array.isArray(val) ? val : []
       return arr.map((v) => quote(v)).join(', ')
     }
+    case 'raw':
+      return typeof val === 'string' ? val : '' // 따옴표 없이 그대로(식별자 보간)
     case 'range':
       return '' // range는 아래 applyParams에서 .start/.end 토큰을 직접 치환
     default: {

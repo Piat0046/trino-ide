@@ -213,6 +213,7 @@ function ParamControl({ def, value, onChange, disabled, invalid, hintId }: Contr
         />
       )
     default: {
+      // text, raw — raw는 따옴표 없이 그대로 삽입(식별자 보간)
       const v = typeof value === 'string' ? value : ''
       return (
         <input
@@ -220,6 +221,7 @@ function ParamControl({ def, value, onChange, disabled, invalid, hintId }: Contr
           className="param-input"
           value={v}
           disabled={disabled}
+          placeholder={def.kind === 'raw' ? '그대로 삽입' : undefined}
           onChange={(e) => onChange(e.target.value)}
           {...aria}
         />
