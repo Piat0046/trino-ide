@@ -80,3 +80,12 @@ export function makeBound(
 export function isDirty(t: EditorTab): boolean {
   return t.sql !== t.baseSql
 }
+
+/**
+ * 미작업(일회용) 탭: 연 뒤 편집·실행이 전혀 없는 탭.
+ * 새 콘텐츠를 열 때 이 탭을 교체(누적 방지) 대상으로 삼는다 — non-dirty라 무손실.
+ * `!running`이 실행 창(requestId/progress 세팅~해제)을 완전히 덮으므로 그 둘은 따로 안 본다.
+ */
+export function isDisposable(t: EditorTab): boolean {
+  return !isDirty(t) && t.result === null && t.error === null && !t.running
+}

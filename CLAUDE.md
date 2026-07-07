@@ -67,7 +67,8 @@ renderer (React)  ──IPC──▶  main process  ──HTTP──▶  Trino
 ### 멀티 탭 에디터 모델 (`renderer/src/lib/tabs.ts`)
 - **탭 1개 = 독립 SQL 문서**(`EditorTab`). `savedQueryId!=null`이면 저장 쿼리 **바인딩** 탭, null이면 미저장 **스크래치** 탭. `dirty = sql !== baseSql`.
 - **탭별 상태**: `sql`/`baseSql`/`hostId`/`result`/`error`/`running`/`requestId`/`progress`. **전역**: `hosts`/`selectedHostId`/`library`/`history`. → 즉 **결과·연결은 탭마다**.
-- 저장 쿼리 클릭 = **open-or-focus**(같은 쿼리가 열려 있으면 그 탭 포커스, 아니면 새 탭). 히스토리·새 탭은 항상 새 스크래치. 폴더 `＋쿼리`는 **빈 SQL** 쿼리를 `Untitled query N`으로 즉시 생성→바인딩 탭으로 연다.
+- 저장 쿼리 클릭 = **open-or-focus**(같은 쿼리가 열려 있으면 그 탭 포커스). 폴더 `＋쿼리`는 **빈 SQL** 쿼리를 `Untitled query N`으로 즉시 생성→바인딩 탭으로 연다.
+- **미작업(일회용) 탭 교체(#42)**: 콘텐츠를 새로 열 때(저장쿼리 신규·히스토리·＋)는 포커스 pane의 활성 탭이 **`isDisposable`**(=`!isDirty && result===null && error===null && !running`, 즉 연 뒤 편집·실행 0)이면 **새 탭을 쌓지 않고 그 자리에 교체**한다(`openOrReplaceInFocused`가 **탭 id를 재사용** → 탭 순서·⌘1..9 인덱스 안정, 누적 없이 내용만 스왑). 편집(→dirty)이나 실행(→result/running)으로 disposable이 풀린 탭은 보존된다. `＋`는 활성 탭이 **빈 미작업 스크래치**면 no-op(빈 탭 누적 차단), 아니면 새 스크래치(빈 바인딩 탭 제외). 활성 탭만 대상(백그라운드 탭 불변), non-dirty라 `CloseTabDialog`/`cancelQuery` 안 탐 — 순수 renderer.
 - 저장(💾): 스크래치면 `SaveQueryDialog`로 저장 후 그 탭을 **리바인딩**, 바인딩이면 `updateQuery`로 **덮어쓰기**. 닫기: dirty면 `CloseTabDialog`(저장/저장안함/취소), 마지막 탭 닫으면 새 스크래치 자동 생성. 저장 쿼리가 삭제되면 열린 탭은 **스크래치로 변환**(작업 보존, `App`의 reconcile effect).
 
 - `renderer/src/` — React UI. **보편적 DB IDE 레이아웃**: 좌측 `ActivityRail`(아이콘) + `explorer`(섹션 패널) + `workspace`(에디터/결과) + 하단 `StatusBar`. `App.tsx`가 상태/오케스트레이션:
