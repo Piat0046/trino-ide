@@ -28,6 +28,7 @@ import {
   type EditorTab,
   type Pane,
   isDirty,
+  isDisposable,
   makeBound,
   makePane,
   makeScratch,
@@ -150,6 +151,36 @@ export default function App(): JSX.Element {
         return p
       })
     })
+
+  // 포커스 pane의 활성 탭이 미작업(disposable)이면 그 자리(같은 id)에 교체, 아니면 새 탭 추가.
+  // id를 재사용해 탭 슬롯(순서·⌘1..9 인덱스)이 안정 — 누적 없이 내용만 스왑한다.
+  const openOrReplaceInFocused = (build: () => EditorTab): EditorTab => {
+    const active = activeTabOf(focusedPane)
+    const built = build()
+    if (active && isDisposable(active)) {
+      const replaced: EditorTab = {
+        ...built,
+        id: active.id,
+        // 스크래치→스크래치 교체면 슬롯의 기존 제목을 유지(Untitled 번호 건너뜀 방지)
+        title:
+          built.savedQueryId === null && active.savedQueryId === null ? active.title : built.title
+      }
+      setPanes((prev) =>
+        prev.map((p) =>
+          p.id === focusedPane.id
+            ? {
+                ...p,
+                tabs: p.tabs.map((t) => (t.id === active.id ? replaced : t)),
+                activeTabId: replaced.id
+              }
+            : p
+        )
+      )
+      return replaced
+    }
+    addTabToFocused(built)
+    return built
+  }
 
   const tabTitle = (t: EditorTab): string =>
     t.savedQueryId ? (library.queries.find((q) => q.id === t.savedQueryId)?.name ?? t.title) : t.title
@@ -303,9 +334,7 @@ export default function App(): JSX.Element {
         return existing
       }
     }
-    const tab = makeBound(q, selectedHostId)
-    addTabToFocused(tab)
-    return tab
+    return openOrReplaceInFocused(() => makeBound(q, selectedHostId))
   }
 
   // 탭이 속한 pane에서 닫는다(비면 새 스크래치로 대체)
@@ -393,7 +422,14 @@ export default function App(): JSX.Element {
   const paneOf = (paneId: string): Pane | undefined => panes.find((p) => p.id === paneId)
   const newScratchInPane = (paneId: string): void => {
     const p = paneOf(paneId)
-    addTabToPane(paneId, makeScratch('', activeTabOf(p!)?.hostId ?? selectedHostId, nextUntitled(allTitles())))
+    const active = p ? activeTabOf(p) : undefined
+    // 이미 앞에 빈 미작업 스크래치가 있으면 그게 곧 "새 탭" — 빈 탭을 또 만들지 않는다.
+    // (빈 바인딩 탭=빈 저장쿼리는 제외 — 타이핑 시 저장되는 별개 탭이라 "+"로 새 스크래치를 열어야 함)
+    if (active && isDisposable(active) && active.savedQueryId === null && active.sql.trim() === '') {
+      setFocusedPaneId(paneId)
+      return
+    }
+    addTabToPane(paneId, makeScratch('', active?.hostId ?? selectedHostId, nextUntitled(allTitles())))
   }
   const selectHostInPane = (paneId: string, id: string): void => {
     setFocusedPaneId(paneId)
@@ -507,9 +543,7 @@ export default function App(): JSX.Element {
   // ----- history actions (항상 새 스크래치 탭) -----
   const openHistoryTab = (entry: HistoryEntry): EditorTab => {
     const hostId = hosts.some((h) => h.id === entry.hostId) ? entry.hostId : selectedHostId
-    const tab = makeScratch(entry.sql, hostId, nextUntitled(allTitles()))
-    addTabToFocused(tab)
-    return tab
+    return openOrReplaceInFocused(() => makeScratch(entry.sql, hostId, nextUntitled(allTitles())))
   }
   const loadHistory = (entry: HistoryEntry): void => {
     openHistoryTab(entry)
