@@ -1,12 +1,15 @@
 import { useState, type KeyboardEvent } from 'react'
-import type { ParamDef, ParamValue } from '../lib/queryParams'
-import { isValidNumber, paramValueValid } from '../lib/queryParams'
+import type { ParamDef, ParamType, ParamValue } from '../lib/queryParams'
+import { isValidNumber, paramValueValid, PARAM_TYPES } from '../lib/queryParams'
 import { IconChevronDown, IconChevronRight, IconX } from './icons'
 
 interface Props {
+  /** 유효 타입이 반영된 defs(def.kind = 위젯에서 선택된 타입, range는 고정) */
   defs: ParamDef[]
   values: Record<string, ParamValue>
   onChange: (key: string, value: ParamValue) => void
+  /** 파라미터 타입 변경(드롭다운) */
+  onChangeType: (key: string, type: ParamType) => void
   /** 실행 중이면 입력 잠금(값이 바뀌는 혼동 방지) */
   disabled: boolean
   /** 실행이 한 번 차단된 뒤에만 빈 필수 필드를 빨강으로(공격적 pristine 빨강 방지) */
@@ -23,6 +26,7 @@ export function ParamBar({
   defs,
   values,
   onChange,
+  onChangeType,
   disabled,
   showErrors,
   previewSql
@@ -52,6 +56,7 @@ export function ParamBar({
             def={def}
             value={values[def.key]}
             onChange={(v) => onChange(def.key, v)}
+            onChangeType={(t) => onChangeType(def.key, t)}
             disabled={disabled}
             showErrors={showErrors}
           />
@@ -71,6 +76,7 @@ interface FieldProps {
   def: ParamDef
   value: ParamValue | undefined
   onChange: (v: ParamValue) => void
+  onChangeType: (t: ParamType) => void
   disabled: boolean
   showErrors: boolean
 }
@@ -96,17 +102,43 @@ function hintFor(def: ParamDef, value: ParamValue | undefined, showErrors: boole
   return '값을 입력하세요'
 }
 
-function ParamField({ def, value, onChange, disabled, showErrors }: FieldProps): JSX.Element {
+function ParamField({
+  def,
+  value,
+  onChange,
+  onChangeType,
+  disabled,
+  showErrors
+}: FieldProps): JSX.Element {
   const invalid = showErrors && !paramValueValid(def, value)
   const hint = hintFor(def, value, showErrors)
   const hintId = hint ? 'phint-' + def.key : undefined
   // range/multi는 컨트롤이 여러 개라 label 대신 role=group(단일 컨트롤 타입만 label)
   const grouped = def.kind === 'range' || def.kind === 'multi'
+  // range는 .start/.end 네이밍으로 고정 → 타입 드롭다운 없음. 그 외는 위젯에서 타입 선택.
+  const typeSelect =
+    def.kind === 'range' ? null : (
+      <select
+        className="param-type"
+        value={def.kind}
+        disabled={disabled}
+        aria-label={def.key + ' 타입'}
+        title="이 매개변수의 타입"
+        onChange={(e) => onChangeType(e.target.value as ParamType)}
+      >
+        {PARAM_TYPES.map((t) => (
+          <option key={t.value} value={t.value}>
+            {t.label}
+          </option>
+        ))}
+      </select>
+    )
   const inner = (
     <>
       <span className="param-label" title={def.key}>
         {def.key}
       </span>
+      {typeSelect}
       <ParamControl
         def={def}
         value={value}

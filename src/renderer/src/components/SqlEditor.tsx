@@ -13,14 +13,19 @@ import {
   scanParams,
   applyParams,
   paramsReady,
-  type ParamValue
+  type ParamValue,
+  type ParamType,
+  type KindMap
 } from '../lib/queryParams'
 import { paramHighlight } from '../lib/cmParams'
 
-/** 파라미터 값 슬롯(owner = 저장쿼리id 또는 스크래치 마커 — 탭 재사용 시 오염 방지). */
+/** 파라미터 슬롯(owner = 저장쿼리id 또는 스크래치 마커 — 탭 재사용 시 오염 방지). */
 interface ParamSlot {
   owner: string
+  /** 파라미터 값(def.key → 값) */
   values: Record<string, ParamValue>
+  /** 위젯에서 선택한 타입 오버라이드(def.key → 타입) */
+  types: Record<string, ParamType>
 }
 import { IconAlertTriangle, IconFormat, IconPlay, IconSave, IconStop } from './icons'
 import { EditorTabs, type TabView } from './EditorTabs'
@@ -153,42 +158,82 @@ export function SqlEditor({
     storeRef.current = next
     setParamStore(next)
   }
+  const emptySlot: ParamSlot = { owner: paramOwner, values: {}, types: {} }
   const activeSlot = paramStore[activeTabId]
-  const paramValues = activeSlot && activeSlot.owner === paramOwner ? activeSlot.values : {}
+  const slot = activeSlot && activeSlot.owner === paramOwner ? activeSlot : emptySlot
+  const paramValues = slot.values
 
   // owner가 바뀌면(다른 저장쿼리/스크래치가 이 슬롯을 차지) 그 owner의 저장값으로 재로딩
   useEffect(() => {
     const cur = storeRef.current[activeTabId]
     if (cur && cur.owner === paramOwner) return
     let values: Record<string, ParamValue> = {}
+    let types: Record<string, ParamType> = {}
     if (savedQueryId) {
       try {
         const raw = localStorage.getItem('param:' + savedQueryId)
-        if (raw) values = JSON.parse(raw)
+        if (raw) {
+          const p = JSON.parse(raw)
+          values = p.values ?? {}
+          types = p.types ?? {}
+        }
       } catch {
         /* ignore */
       }
     }
-    writeStore({ ...storeRef.current, [activeTabId]: { owner: paramOwner, values } })
+    writeStore({ ...storeRef.current, [activeTabId]: { owner: paramOwner, values, types } })
   }, [activeTabId, savedQueryId, paramOwner])
 
-  const setParam = (key: string, value: ParamValue): void => {
-    const cur = storeRef.current[activeTabId]
-    const base = cur && cur.owner === paramOwner ? cur.values : {}
-    const values = { ...base, [key]: value }
-    writeStore({ ...storeRef.current, [activeTabId]: { owner: paramOwner, values } })
+  const persist = (next: ParamSlot): void => {
     if (savedQueryId) {
       try {
-        localStorage.setItem('param:' + savedQueryId, JSON.stringify(values))
+        localStorage.setItem(
+          'param:' + savedQueryId,
+          JSON.stringify({ values: next.values, types: next.types })
+        )
       } catch {
         /* ignore */
       }
     }
   }
+  const curSlot = (): ParamSlot => {
+    const cur = storeRef.current[activeTabId]
+    return cur && cur.owner === paramOwner ? cur : { owner: paramOwner, values: {}, types: {} }
+  }
+  const setParam = (key: string, value: ParamValue): void => {
+    const base = curSlot()
+    const next: ParamSlot = { ...base, values: { ...base.values, [key]: value } }
+    writeStore({ ...storeRef.current, [activeTabId]: next })
+    persist(next)
+  }
+  const setType = (key: string, type: ParamType): void => {
+    const base = curSlot()
+    const prevType = base.types[key] ?? paramDefs.find((d) => d.key === key)?.kind ?? 'raw'
+    // multi ↔ 다른 타입 전환은 값 형상이 달라 값을 리셋
+    const values =
+      (prevType === 'multi') !== (type === 'multi')
+        ? { ...base.values, [key]: type === 'multi' ? [] : '' }
+        : base.values
+    const next: ParamSlot = { owner: paramOwner, values, types: { ...base.types, [key]: type } }
+    writeStore({ ...storeRef.current, [activeTabId]: next })
+    persist(next)
+  }
 
+  // 위젯에서 선택된 유효 타입을 반영한 defs/kinds(range는 네이밍으로 고정 — 드롭다운 없음)
+  const effectiveDefs = useMemo(
+    () =>
+      paramDefs.map((d) =>
+        d.kind === 'range' ? d : { ...d, kind: slot.types[d.key] ?? d.kind }
+      ),
+    [paramDefs, slot.types]
+  )
+  const paramKinds = useMemo(
+    () => Object.fromEntries(effectiveDefs.map((d) => [d.key, d.kind])) as KindMap,
+    [effectiveDefs]
+  )
   const compiledPreview = useMemo(
-    () => (paramDefs.length ? applyParams(runTarget.text, paramValues) : runTarget.text),
-    [paramDefs.length, runTarget.text, paramValues]
+    () => (paramDefs.length ? applyParams(runTarget.text, paramValues, paramKinds) : runTarget.text),
+    [paramDefs.length, runTarget.text, paramValues, paramKinds]
   )
 
   // 빈 필수 필드는 실행이 한 번 차단된 뒤에만 빨강으로(공격적 pristine 빨강 방지)
@@ -204,11 +249,14 @@ export function SqlEditor({
     const head = view ? view.state.selection.main.head : 0
     const target = resolveRunTarget(doc, from, to, head)
     if (target.spansMultiple || !target.text.trim()) return
-    const defs = scanParams(target.text)
-    if (defs.length) {
-      const cur = storeRef.current[activeTabId]
-      const vals = cur && cur.owner === paramOwner ? cur.values : {}
-      if (!paramsReady(defs, vals)) {
+    const rawDefs = scanParams(target.text)
+    if (rawDefs.length) {
+      const s = curSlot()
+      const defs = rawDefs.map((d) =>
+        d.kind === 'range' ? d : { ...d, kind: s.types[d.key] ?? d.kind }
+      )
+      const kinds = Object.fromEntries(defs.map((d) => [d.key, d.kind])) as KindMap
+      if (!paramsReady(defs, s.values)) {
         setParamErrors(true)
         onNotify?.('매개변수 값을 먼저 채우세요')
         requestAnimationFrame(() => {
@@ -220,7 +268,7 @@ export function SqlEditor({
         })
         return
       }
-      onRun(applyParams(target.text, vals))
+      onRun(applyParams(target.text, s.values, kinds))
       return
     }
     onRun(target.text)
@@ -350,9 +398,10 @@ export function SqlEditor({
 
       {paramDefs.length > 0 && (
         <ParamBar
-          defs={paramDefs}
+          defs={effectiveDefs}
           values={paramValues}
           onChange={setParam}
+          onChangeType={setType}
           disabled={running}
           showErrors={paramErrors}
           previewSql={compiledPreview}

@@ -91,9 +91,18 @@ export function paramRanges(sql: string): Array<{ from: number; to: number }> {
 }
 
 function normalizeType(t?: string): ParamType {
-  if (t === 'number' || t === 'date' || t === 'multi' || t === 'raw') return t
-  return 'text' // 미지정·미지원 타입은 text로 폴백
+  if (t === 'number' || t === 'date' || t === 'multi' || t === 'text') return t
+  return 'raw' // 미지정·미지원 타입은 raw(그대로) — 인용이 필요하면 위젯에서 '문자열' 선택
 }
+
+/** 위젯 타입 드롭다운에 노출할 타입과 라벨(range는 .start/.end 네이밍으로 자동 → 제외). */
+export const PARAM_TYPES: ReadonlyArray<{ value: ParamType; label: string }> = [
+  { value: 'raw', label: '그대로' },
+  { value: 'text', label: '문자열' },
+  { value: 'number', label: '숫자' },
+  { value: 'date', label: '날짜' },
+  { value: 'multi', label: '여러 값' }
+]
 
 /**
  * 실행 대상 SQL에서 파라미터 정의를 순서대로(중복 제거) 추출한다.
@@ -200,33 +209,41 @@ function compileValue(def: ParamDef, val: ParamValue | undefined): string {
   }
 }
 
+/** 위젯에서 선택된 유효 타입 맵(def.key → kind). range base는 'range'. */
+export type KindMap = Record<string, ParamDef['kind']>
+
 /**
  * SQL의 모든 {{…}} 토큰을 값으로 치환한 최종 SQL을 만든다(문자열/주석 속 토큰은 보존).
- * values: def.key → ParamValue. range는 {start,end}로 넣으면 .start/.end 토큰이 각각 DATE '…'로.
+ * values: def.key → ParamValue. kinds: def.key → 위젯에서 선택된 타입(없으면 raw로 폴백).
+ * range는 kinds[base]==='range'일 때 .start/.end 토큰이 각각 DATE '…'로.
  */
-export function applyParams(sql: string, values: Record<string, ParamValue>): string {
+export function applyParams(
+  sql: string,
+  values: Record<string, ParamValue>,
+  kinds: KindMap = {}
+): string {
   const tokens = scanRawTokens(sql)
   let out = ''
   let last = 0
   for (const t of tokens) {
     if (!NAME_RE.test(t.name) || t.name.toLowerCase() === 'snippet') continue // 보존
     out += sql.slice(last, t.start)
-    out += renderToken(t, values)
+    out += renderToken(t, values, kinds)
     last = t.end
   }
   out += sql.slice(last)
   return out
 }
 
-function renderToken(t: RawToken, values: Record<string, ParamValue>): string {
+function renderToken(t: RawToken, values: Record<string, ParamValue>, kinds: KindMap): string {
   const m = /^(.+)\.(start|end)$/.exec(t.name)
-  if (m) {
+  if (m && kinds[m[1]] === 'range') {
     const v = values[m[1]]
-    // range 짝(양쪽)이 값맵에 range 객체로 들어와 있을 때만 DATE로 묶는다
     if (v && typeof v === 'object' && !Array.isArray(v)) {
       return 'DATE ' + quote(m[2] === 'start' ? v.start : v.end)
     }
-    // 짝이 없으면 scanParams가 일반 파라미터(key=t.name)로 degrade → 그대로 렌더
+    return 'DATE ' + quote('')
   }
-  return compileValue({ key: t.name, kind: normalizeType(t.type), raw: t.name }, values[t.name])
+  const kind = kinds[t.name] ?? 'raw'
+  return compileValue({ key: t.name, kind, raw: t.name }, values[t.name])
 }
