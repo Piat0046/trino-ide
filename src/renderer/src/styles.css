@@ -812,8 +812,16 @@ select {
   min-height: 64px; /* 에디터를 최소로 줄여도 코드 몇 줄은 보이게 */
   overflow: hidden;
   background: var(--bg-2);
-  /* cm-editor를 퍼센트 높이가 아니라 flex로 채워 높이를 확정(중첩 flex에서 % 미해석 방지)
-     → 내용이 넘치면 .cm-scroller(overflow:auto)가 스크롤 */
+  /* 높이를 flex로 확정: cm-host → (uiw 래퍼) → cm-editor 를 전부 flex:1로 채워
+     .cm-editor 높이를 바운드 → .cm-scroller(overflow:auto)가 스크롤. 퍼센트 높이 미의존. */
+  display: flex;
+  flex-direction: column;
+}
+/* @uiw/react-codemirror가 .cm-host와 .cm-editor 사이에 끼우는 래퍼(.cm-theme-*). 여기서
+   flex 체인이 끊기지 않게 래퍼도 채운다 — 없으면 에디터가 내용 높이로 자라 스크롤이 안 됨. */
+.cm-host > div {
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
