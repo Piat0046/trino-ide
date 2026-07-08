@@ -382,7 +382,6 @@ export function SqlEditor({
         <CodeMirror
           ref={cmRef}
           value={sqlText}
-          height="100%"
           theme="dark"
           extensions={[
             trinoSupport,

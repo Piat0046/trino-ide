@@ -7,11 +7,15 @@ import { EditorView } from '@codemirror/view'
  */
 export const cmTheme = EditorView.theme(
   {
-    '&': { backgroundColor: 'transparent', color: 'var(--text-0)', height: '100%' },
+    // 높이는 CSS로 채운다(.cm-host{display:flex} > .cm-editor{flex:1}) — 퍼센트 높이 미사용.
+    '&': { backgroundColor: 'transparent', color: 'var(--text-0)' },
     '.cm-scroller': {
       fontFamily: 'var(--mono)',
       fontSize: '13px',
-      lineHeight: '1.6'
+      lineHeight: '1.6',
+      // 고정 높이 슬롯을 넘는 SQL을 휠로 스크롤(세로/가로). 끝에서 결과·페이지로 전파 방지.
+      overflow: 'auto',
+      overscrollBehavior: 'contain'
     },
     '.cm-gutters': {
       backgroundColor: 'transparent',
