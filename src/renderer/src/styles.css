@@ -620,12 +620,14 @@ select {
   background: var(--accent);
 }
 
-/* 에디터 페인 */
+/* 에디터 페인 — 결과와 세로 비율 공유(--editor-grow). 경계선은 v-splitter가 소유. */
+/* min-height:0 유지(필수): cm-host(flex:1)의 스크롤 idiom을 살린다. 극단 저비율+짧은 창에선
+   하단이 소폭 클리핑될 수 있으나(툴바는 상주·드래그로 복구), 결과를 우선 보호하는 우아한 열화. */
 .editor-pane {
   display: flex;
   flex-direction: column;
-  flex: 0 0 auto;
-  border-bottom: 1px solid var(--border);
+  flex: var(--editor-grow, 0.4) 1 0;
+  min-height: 0;
 }
 .tabstrip {
   display: flex;
@@ -806,7 +808,8 @@ select {
 }
 
 .cm-host {
-  height: clamp(150px, 34vh, 520px);
+  flex: 1;
+  min-height: 64px; /* 에디터를 최소로 줄여도 코드 몇 줄은 보이게 */
   overflow: hidden;
   background: var(--bg-2);
 }
@@ -821,10 +824,38 @@ select {
 
 /* ===== 결과 페인 ===== */
 .results {
-  flex: 1;
+  flex: var(--results-grow, 0.6) 1 0;
   display: flex;
   flex-direction: column;
-  min-height: 0;
+  min-height: 120px; /* 결과를 최소로 줄여도 헤더+몇 행은 남게(내부는 가상 스크롤) */
+}
+
+/* 에디터↔결과 세로 divider(.ws-splitter 언어를 가로로). 드래그=높이 조절, 더블클릭=리셋 */
+.v-splitter {
+  position: relative;
+  height: 6px;
+  flex-shrink: 0;
+  cursor: row-resize;
+  background: transparent;
+  z-index: 5;
+}
+.v-splitter::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 2px;
+  height: 1px;
+  background: var(--border);
+  transition:
+    background 0.12s ease,
+    height 0.12s ease;
+}
+.v-splitter:hover::after,
+.v-splitter:active::after {
+  height: 2px;
+  top: 2px;
+  background: var(--accent);
 }
 .results-tabs {
   display: flex;
@@ -1668,6 +1699,11 @@ select {
 body.col-resizing,
 body.col-resizing * {
   cursor: col-resize !important;
+  user-select: none !important;
+}
+body.row-resizing,
+body.row-resizing * {
+  cursor: row-resize !important;
   user-select: none !important;
 }
 .g-hcell .col-name {

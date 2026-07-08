@@ -3,6 +3,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type CSSProperties,
   type MouseEvent as ReactMouseEvent
 } from 'react'
 import type {
@@ -111,6 +112,11 @@ export default function App(): JSX.Element {
   const [splitRatio, setSplitRatio] = useState<number>(() => {
     const v = Number(localStorage.getItem('wsSplitRatio'))
     return Number.isFinite(v) && v >= 0.3 && v <= 0.7 ? v : 0.5
+  })
+  // 에디터↔결과 세로 비율(에디터 몫 0.15~0.85). 분할 시 양쪽 pane 공유.
+  const [editorRatio, setEditorRatio] = useState<number>(() => {
+    const v = Number(localStorage.getItem('editorRatio'))
+    return Number.isFinite(v) && v >= 0.15 && v <= 0.85 ? v : 0.4
   })
   const [saveTargetTabId, setSaveTargetTabId] = useState<string | null>(null)
 
@@ -278,6 +284,10 @@ export default function App(): JSX.Element {
   useEffect(() => {
     localStorage.setItem('wsSplitRatio', String(splitRatio))
   }, [splitRatio])
+  // 에디터↔결과 비율 영속화
+  useEffect(() => {
+    localStorage.setItem('editorRatio', String(editorRatio))
+  }, [editorRatio])
 
   // hostId 정리(모든 pane): 삭제된 host를 가리키는 탭(복원분 포함)은 정리하고, 빈 hostId는 기본 연결로 채움.
   // hosts 미로드(length 0) 시엔 복원된 hostId를 성급히 지우지 않는다.
@@ -539,6 +549,24 @@ export default function App(): JSX.Element {
     window.addEventListener('mousemove', move)
     window.addEventListener('mouseup', end)
     document.body.classList.add('col-resizing')
+  }
+
+  // 에디터↔결과 세로 크기조절(divider 드래그). 포함 pane 높이 기준 비율, 0.15~0.85 클램프.
+  const startEditorResize = (e: ReactMouseEvent): void => {
+    e.preventDefault()
+    const pane = (e.currentTarget as HTMLElement).closest('.ws-pane')
+    if (!pane) return
+    const rect = pane.getBoundingClientRect()
+    const move = (ev: MouseEvent): void =>
+      setEditorRatio(Math.min(0.85, Math.max(0.15, (ev.clientY - rect.top) / rect.height)))
+    const end = (): void => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', end)
+      document.body.classList.remove('row-resizing')
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', end)
+    document.body.classList.add('row-resizing')
   }
 
   // ----- 저장(💾) -----
@@ -933,7 +961,13 @@ export default function App(): JSX.Element {
       <div
         key={pane.id}
         className={'ws-pane' + (split && pane.id === focusedPane.id ? ' focused' : '')}
-        style={split ? { flex: pane.id === panes[0].id ? splitRatio : 1 - splitRatio } : undefined}
+        style={
+          {
+            ...(split ? { flex: pane.id === panes[0].id ? splitRatio : 1 - splitRatio } : {}),
+            '--editor-grow': editorRatio,
+            '--results-grow': 1 - editorRatio
+          } as CSSProperties
+        }
         onMouseDownCapture={() => setFocusedPaneId(pane.id)}
         onFocusCapture={() => setFocusedPaneId(pane.id)}
       >
@@ -961,6 +995,18 @@ export default function App(): JSX.Element {
           metadata={metadata[pa?.hostId ?? ''] ?? null}
           split={split}
           onToggleSplit={toggleSplit}
+        />
+        <div
+          className="v-splitter"
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="에디터와 결과 높이 조절"
+          aria-valuemin={15}
+          aria-valuemax={85}
+          aria-valuenow={Math.round(editorRatio * 100)}
+          title="드래그로 높이 조절 · 더블클릭으로 기본 복원"
+          onMouseDown={startEditorResize}
+          onDoubleClick={() => setEditorRatio(0.4)}
         />
         <ResultsPane
           result={pa?.result ?? null}

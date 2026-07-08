@@ -11,7 +11,10 @@ export const cmTheme = EditorView.theme(
     '.cm-scroller': {
       fontFamily: 'var(--mono)',
       fontSize: '13px',
-      lineHeight: '1.6'
+      lineHeight: '1.6',
+      // 고정 높이 슬롯을 넘는 SQL을 휠로 스크롤(세로/가로). 끝에서 결과·페이지로 전파 방지.
+      overflow: 'auto',
+      overscrollBehavior: 'contain'
     },
     '.cm-gutters': {
       backgroundColor: 'transparent',
