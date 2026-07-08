@@ -7,7 +7,8 @@ import { EditorView } from '@codemirror/view'
  */
 export const cmTheme = EditorView.theme(
   {
-    '&': { backgroundColor: 'transparent', color: 'var(--text-0)', height: '100%' },
+    // 높이는 CSS로 채운다(.cm-host{display:flex} > .cm-editor{flex:1}) — 퍼센트 높이 미사용.
+    '&': { backgroundColor: 'transparent', color: 'var(--text-0)' },
     '.cm-scroller': {
       fontFamily: 'var(--mono)',
       fontSize: '13px',

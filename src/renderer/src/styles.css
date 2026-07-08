@@ -812,9 +812,14 @@ select {
   min-height: 64px; /* 에디터를 최소로 줄여도 코드 몇 줄은 보이게 */
   overflow: hidden;
   background: var(--bg-2);
+  /* cm-editor를 퍼센트 높이가 아니라 flex로 채워 높이를 확정(중첩 flex에서 % 미해석 방지)
+     → 내용이 넘치면 .cm-scroller(overflow:auto)가 스크롤 */
+  display: flex;
+  flex-direction: column;
 }
 .cm-host .cm-editor {
-  height: 100%;
+  flex: 1;
+  min-height: 0; /* 스크롤 idiom: 에디터가 내용 높이로 자라지 않고 scroller가 바운드되게 */
 }
 /* 커서가 놓인 문장 = 실행될 단위. 은은한 틸 워시 + 좌측 액센트 바로 "선택됨"을 표시 */
 .cm-host .cm-line.cm-stmt-active {
