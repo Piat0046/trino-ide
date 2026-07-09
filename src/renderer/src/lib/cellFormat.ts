@@ -41,26 +41,55 @@ export function prettyValue(v: unknown): string {
   return String(v)
 }
 
-/** 문자열이 JSON 객체/배열 형태로 보이는지(pretty 버튼 노출 판정 — 값싼 휴리스틱). */
-export function looksLikeJson(v: unknown): boolean {
-  if (typeof v !== 'string') return false
-  const t = v.trim()
-  return t.startsWith('{') || t.startsWith('[')
+export interface ValueViews {
+  /** 들여쓰기된 JSON. null이면 pretty 불가(정렬 대상 아님) */
+  pretty: string | null
+  /** 원문 표시(객체는 한 줄 JSON, 문자열은 원본) */
+  raw: string
+  /** JSON 형태로 보이는지({/[ 시작 또는 객체) — 깨진 JSON 안내 노출 판정 */
+  looksJson: boolean
 }
 
 /**
- * 문자열을 JSON으로 파싱해 pretty-print. 파싱 실패하거나 객체/배열이 아니면 ok:false.
- * (varchar에 담긴 JSON을 사용자가 pretty로 볼 때 사용)
+ * 인스펙터 값의 pretty/raw 뷰를 한 번에 판정한다.
+ * - 객체(ROW/MAP/ARRAY/JSON 타입이 파싱돼 온 값): pretty=들여쓰기, raw=한 줄.
+ * - varchar에 담긴 JSON 문자열: 파싱되면 pretty=들여쓰기, raw=원문.
+ * - JSON 형태지만 깨진 문자열: pretty=null, looksJson=true (버튼은 뜨되 클릭 시 안내).
+ * - 그 외(일반 문자열/숫자): pretty=null, looksJson=false (버튼 없음).
  */
-export function tryPrettyJson(v: unknown): { ok: boolean; text: string } {
-  if (typeof v !== 'string') return { ok: false, text: '' }
-  try {
-    const parsed = JSON.parse(v)
-    if (parsed === null || typeof parsed !== 'object') return { ok: false, text: '' }
-    return { ok: true, text: JSON.stringify(parsed, null, 2) }
-  } catch {
-    return { ok: false, text: '' }
+export function valueViews(v: unknown): ValueViews {
+  if (v === null || v === undefined) return { pretty: null, raw: '', looksJson: false }
+  if (typeof v === 'object') {
+    let pretty: string | null
+    let raw: string
+    try {
+      pretty = JSON.stringify(v, null, 2)
+    } catch {
+      pretty = null
+    }
+    try {
+      raw = JSON.stringify(v)
+    } catch {
+      raw = String(v)
+    }
+    return { pretty, raw, looksJson: true }
   }
+  if (typeof v === 'string') {
+    const t = v.trim()
+    const looksJson = t.startsWith('{') || t.startsWith('[')
+    if (looksJson) {
+      try {
+        const parsed = JSON.parse(v)
+        if (parsed !== null && typeof parsed === 'object') {
+          return { pretty: JSON.stringify(parsed, null, 2), raw: v, looksJson: true }
+        }
+      } catch {
+        /* 깨진 JSON — 아래로 폴백 */
+      }
+    }
+    return { pretty: null, raw: v, looksJson }
+  }
+  return { pretty: null, raw: String(v), looksJson: false }
 }
 
 // ----- 레코드 스냅샷(선택 행 → 인스펙터로 emit-up하는 파생 값) -----

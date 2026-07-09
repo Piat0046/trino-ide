@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { RecordSnapshot } from '../lib/cellFormat'
-import { typeClass, isNullish, prettyValue, looksLikeJson, tryPrettyJson } from '../lib/cellFormat'
+import { typeClass, isNullish, valueViews } from '../lib/cellFormat'
 import { IconCopy, IconInfo, IconSearch, IconSparkles, IconX } from './icons'
 
 const api = window.api
@@ -98,8 +98,8 @@ interface DetailsProps {
 function DetailsTab({ record, hasResult, hasRows, running, hasError }: DetailsProps): JSX.Element {
   const [find, setFind] = useState('')
   const [flash, setFlash] = useState(false)
-  // 필드별 pretty 상태: 'on'=pretty 표시, 'err'=JSON 아님 안내
-  const [prettyState, setPrettyState] = useState<Record<number, 'on' | 'err'>>({})
+  // 필드별 pretty override: 'raw'=사용자가 원문으로 끔, 'err'=깨진 JSON 안내. 없으면 기본(pretty ON).
+  const [prettyState, setPrettyState] = useState<Record<number, 'raw' | 'err'>>({})
   const listRef = useRef<HTMLDivElement>(null)
 
   // 새 레코드가 오면 검색·pretty 상태 초기화
@@ -129,19 +129,24 @@ function DetailsTab({ record, hasResult, hasRows, running, hasError }: DetailsPr
     el?.scrollIntoView({ block: 'nearest' })
   }, [record, q])
 
-  const copyValue = async (v: unknown): Promise<void> => {
-    await api.copyToClipboard(isNullish(v) ? '' : prettyValue(v))
+  // 현재 표시 중인 텍스트를 그대로 복사(pretty/raw 토글 상태를 존중)
+  const copyText = async (text: string): Promise<void> => {
+    await api.copyToClipboard(text)
     setFlash(true)
   }
 
-  // Pretty 버튼: on이면 원문으로, 아니면 JSON 파싱 시도 → 되면 on, 안 되면 err(인라인 안내)
-  const togglePretty = (idx: number, v: unknown): void => {
+  // Pretty 버튼 토글:
+  // - pretty 가능 필드: 기본 ON(default). 클릭하면 'raw'로 저장(원문), 다시 클릭하면 default(pretty)로.
+  // - JSON 형태지만 깨진 문자열(canPretty=false): 클릭하면 'err'(안내), 다시 클릭하면 해제.
+  const togglePretty = (idx: number, canPretty: boolean): void => {
     setPrettyState((s) => {
       const next = { ...s }
-      if (next[idx] === 'on') {
-        delete next[idx]
+      if (canPretty) {
+        if (next[idx] === 'raw') delete next[idx]
+        else next[idx] = 'raw'
       } else {
-        next[idx] = tryPrettyJson(v).ok ? 'on' : 'err'
+        if (next[idx] === 'err') delete next[idx]
+        else next[idx] = 'err'
       }
       return next
     })
@@ -181,10 +186,14 @@ function DetailsTab({ record, hasResult, hasRows, running, hasError }: DetailsPr
         ) : (
           fields.map((f) => {
             const nul = isNullish(f.value)
-            const pstate = prettyState[f.idx]
-            const canPretty = !nul && looksLikeJson(f.value) // varchar에 담긴 JSON 형태
-            const shown =
-              pstate === 'on' ? tryPrettyJson(f.value).text : nul ? '' : prettyValue(f.value)
+            const views = valueViews(f.value)
+            const canPretty = views.pretty !== null // 정렬 가능(객체 또는 파싱되는 JSON 문자열)
+            const override = prettyState[f.idx]
+            // 기본: 정렬 가능하면 pretty ON. 사용자가 'raw'로 끄면 원문.
+            const prettyOn = canPretty && override !== 'raw'
+            const shown = prettyOn ? (views.pretty as string) : views.raw
+            // 버튼은 정렬 가능하거나 JSON 형태(깨진 것 포함)일 때 노출
+            const showBtn = !nul && (canPretty || views.looksJson)
             return (
               <div
                 key={f.idx}
@@ -202,7 +211,7 @@ function DetailsTab({ record, hasResult, hasRows, running, hasError }: DetailsPr
                     className="insp-copy"
                     title="값 복사"
                     aria-label="값 복사"
-                    onClick={() => void copyValue(f.value)}
+                    onClick={() => void copyText(nul ? '' : shown)}
                   >
                     <IconCopy size={13} />
                   </button>
@@ -211,18 +220,18 @@ function DetailsTab({ record, hasResult, hasRows, running, hasError }: DetailsPr
                   <div className="insp-value null">NULL</div>
                 ) : (
                   <div className="insp-value-wrap">
-                    {canPretty && (
+                    {showBtn && (
                       <button
-                        className={'insp-pretty' + (pstate === 'on' ? ' active' : '')}
+                        className={'insp-pretty' + (prettyOn ? ' active' : '')}
                         title="JSON을 보기 좋게 정렬"
-                        aria-pressed={pstate === 'on'}
-                        onClick={() => togglePretty(f.idx, f.value)}
+                        aria-pressed={prettyOn}
+                        onClick={() => togglePretty(f.idx, canPretty)}
                       >
-                        {pstate === 'on' ? '원문' : 'Pretty'}
+                        {prettyOn ? '원문' : 'Pretty'}
                       </button>
                     )}
                     <div className="insp-value">{shown}</div>
-                    {pstate === 'err' && (
+                    {override === 'err' && (
                       <div className="insp-pretty-err">JSON 형식이 아니에요</div>
                     )}
                   </div>
