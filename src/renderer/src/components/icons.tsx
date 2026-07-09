@@ -215,3 +215,23 @@ export const IconRefresh = ({ size }: IconProps): JSX.Element =>
     </>,
     size
   )
+
+// 인스펙터 우측 레일용
+export const IconInfo = ({ size }: IconProps): JSX.Element =>
+  svg(
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 16v-4" />
+      <path d="M12 8h.01" />
+    </>,
+    size
+  )
+
+export const IconSparkles = ({ size }: IconProps): JSX.Element =>
+  svg(
+    <>
+      <path d="M12 3l1.8 4.7L18.5 9.5 13.8 11.3 12 16l-1.8-4.7L5.5 9.5l4.7-1.8z" />
+      <path d="M18 15l.7 1.8L20.5 17.5l-1.8.7L18 20l-.7-1.8L15.5 17.5l1.8-.7z" />
+    </>,
+    size
+  )

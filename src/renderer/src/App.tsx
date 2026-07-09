@@ -26,6 +26,9 @@ import { HostDialog } from './components/HostDialog'
 import { SqlEditor } from './components/SqlEditor'
 import { scanParams } from './lib/queryParams'
 import { ResultsPane } from './components/ResultsPane'
+import { RightRail, type InspectorTab } from './components/RightRail'
+import { InspectorPanel } from './components/InspectorPanel'
+import type { RecordSnapshot } from './lib/cellFormat'
 import { StatusBar } from './components/StatusBar'
 import { SaveQueryDialog, type SaveQueryResult } from './components/SaveQueryDialog'
 import { PromptDialog } from './components/PromptDialog'
@@ -52,6 +55,9 @@ const EMPTY_LIBRARY: SavedLibrary = { folders: [], queries: [] }
 const MIN_EXPLORER = 190
 const MAX_EXPLORER = 460
 const DEFAULT_EXPLORER = 264
+const MIN_INSPECTOR = 240
+const MAX_INSPECTOR = 560
+const DEFAULT_INSPECTOR = 320
 
 interface PromptConfig {
   title: string
@@ -68,6 +74,19 @@ export default function App(): JSX.Element {
     const v = Number(localStorage.getItem('explorerWidth'))
     return Number.isFinite(v) && v >= MIN_EXPLORER && v <= MAX_EXPLORER ? v : DEFAULT_EXPLORER
   })
+  // 우측 인스펙터 사이드바(Details/Assistant) — explorer 영속 패턴 미러(#48)
+  const [inspectorWidth, setInspectorWidth] = useState<number>(() => {
+    const v = Number(localStorage.getItem('inspectorWidth'))
+    return Number.isFinite(v) && v >= MIN_INSPECTOR && v <= MAX_INSPECTOR ? v : DEFAULT_INSPECTOR
+  })
+  const [inspectorCollapsed, setInspectorCollapsed] = useState<boolean>(
+    () => localStorage.getItem('inspectorCollapsed') !== '0' // 기본 접힘
+  )
+  const [inspectorTab, setInspectorTab] = useState<InspectorTab>(
+    () => (localStorage.getItem('inspectorTab') === 'assistant' ? 'assistant' : 'details')
+  )
+  // 선택 행 스냅샷(pane별) — Details는 포커스 pane 것만 렌더
+  const [recordByPane, setRecordByPane] = useState<Record<string, RecordSnapshot | null>>({})
   const [explorerCollapsed, setExplorerCollapsed] = useState<boolean>(
     () => localStorage.getItem('explorerCollapsed') === '1'
   )
@@ -104,6 +123,14 @@ export default function App(): JSX.Element {
     () => boot?.panes ?? [makePane([makeScratch('', null, 'Untitled query 1')])]
   )
   const [focusedPaneId, setFocusedPaneId] = useState<string>(() => boot?.focusedPaneId ?? '')
+  // 분할 접기 등으로 사라진 pane의 인스펙터 스냅샷 키를 정리(무해하지만 누수 방지)
+  useEffect(() => {
+    const ids = new Set(panes.map((p) => p.id))
+    setRecordByPane((m) => {
+      const kept = Object.keys(m).filter((k) => ids.has(k))
+      return kept.length === Object.keys(m).length ? m : Object.fromEntries(kept.map((k) => [k, m[k]]))
+    })
+  }, [panes])
   // 저장 쿼리 라이브러리가 실제로 로드되기 전에는 reconcile을 돌리지 않는다(복원된 바인딩 탭 오변환 방지)
   const [libraryLoaded, setLibraryLoaded] = useState(false)
   const [closingTabId, setClosingTabId] = useState<string | null>(null)
@@ -841,6 +868,58 @@ export default function App(): JSX.Element {
   useEffect(() => {
     localStorage.setItem('explorerCollapsed', explorerCollapsed ? '1' : '0')
   }, [explorerCollapsed])
+  // 우측 인스펙터 상태 영속화
+  useEffect(() => {
+    localStorage.setItem('inspectorWidth', String(inspectorWidth))
+  }, [inspectorWidth])
+  useEffect(() => {
+    localStorage.setItem('inspectorCollapsed', inspectorCollapsed ? '1' : '0')
+  }, [inspectorCollapsed])
+  useEffect(() => {
+    localStorage.setItem('inspectorTab', inspectorTab)
+  }, [inspectorTab])
+
+  // 우측 레일 아이콘: 접혀 있거나 다른 탭이면 그 탭으로 펼침, 활성 탭 재클릭이면 접기
+  const onInspectorRail = (next: InspectorTab): void => {
+    if (inspectorCollapsed) {
+      setInspectorCollapsed(false)
+      setInspectorTab(next)
+    } else if (next === inspectorTab) {
+      setInspectorCollapsed(true)
+    } else {
+      setInspectorTab(next)
+    }
+  }
+  // ⌘⌥B: 인스펙터 토글
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      // e.code(물리 키): macOS에서 Option+B는 e.key가 조합문자('∫')로 바뀌므로 code로 매칭
+      if ((e.metaKey || e.ctrlKey) && e.altKey && e.code === 'KeyB') {
+        e.preventDefault()
+        setInspectorCollapsed((c) => !c)
+      }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [])
+  // 인스펙터 너비 드래그(우측이라 방향 반전: 왼쪽으로 끌면 넓어짐)
+  const startInspectorResize = (e: ReactMouseEvent): void => {
+    e.preventDefault()
+    const startX = e.clientX
+    const startW = inspectorWidth
+    const move = (ev: MouseEvent): void => {
+      const w = Math.min(MAX_INSPECTOR, Math.max(MIN_INSPECTOR, startW - (ev.clientX - startX)))
+      setInspectorWidth(w)
+    }
+    const end = (): void => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', end)
+      document.body.classList.remove('col-resizing')
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', end)
+    document.body.classList.add('col-resizing')
+  }
 
   // 레일 아이콘: 접힌 상태면 펼치고, 같은 섹션을 다시 누르면 접는다(VS Code 관례)
   const onRailChange = (next: ExplorerSection): void => {
@@ -1015,6 +1094,12 @@ export default function App(): JSX.Element {
           running={pa?.running ?? false}
           progress={pa?.progress ?? null}
           onCancel={() => cancelInPane(pane.id)}
+          onSelectRecord={(snap) =>
+            setRecordByPane((m) =>
+              // null→null 무변경이면 같은 참조 반환(불필요한 재렌더·루프 방지)
+              (m[pane.id] ?? null) === null && snap === null ? m : { ...m, [pane.id]: snap }
+            )
+          }
         />
       </div>
     )
@@ -1098,6 +1183,35 @@ export default function App(): JSX.Element {
             {panes.length > 1 && renderPane(panes[1])}
           </div>
         </div>
+
+        {!inspectorCollapsed && (
+          <div
+            className="splitter"
+            role="separator"
+            aria-orientation="vertical"
+            title="드래그로 크기 조절 · 더블클릭으로 접기"
+            onMouseDown={startInspectorResize}
+            onDoubleClick={() => setInspectorCollapsed(true)}
+          />
+        )}
+        {!inspectorCollapsed && (
+          <div className="inspector-wrap" style={{ width: inspectorWidth }}>
+            <InspectorPanel
+              tab={inspectorTab}
+              onTab={setInspectorTab}
+              record={recordByPane[focusedPaneId] ?? null}
+              hasResult={activeTab?.result != null}
+              hasRows={(activeTab?.result?.rowCount ?? 0) > 0}
+              running={activeTab?.running ?? false}
+              hasError={activeTab?.error != null}
+            />
+          </div>
+        )}
+        <RightRail
+          active={inspectorTab}
+          collapsed={inspectorCollapsed}
+          onSelect={onInspectorRail}
+        />
       </div>
 
       <StatusBar
