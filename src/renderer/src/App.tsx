@@ -1194,6 +1194,14 @@ export default function App(): JSX.Element {
                 browserPanelHostId &&
                 registerTables(browserPanelHostId, catalog, schema, tables)
               }
+              onUnregister={(catalog, schema, table) => {
+                const h = browserPanelHostId
+                if (!h) return
+                void api.deleteMetadata({ hostId: h, catalog, schema, table }).then((m) => {
+                  setMetadata((cur) => ({ ...cur, [h]: m }))
+                  setToast(`'${table}' 등록 해제됨`)
+                })
+              }}
             />
           )}
         </aside>

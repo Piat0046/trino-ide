@@ -2290,6 +2290,11 @@ body.row-resizing * {
 .browse-tree .caret.will-fetch {
   color: var(--warn);
 }
+/* browse의 "등록됨" 배지는 인디고(--meta) — 앰버를 서버 비용 전용으로 순화(Metadata 탭 배지는 불변) */
+.browse-tree .meta-badge {
+  color: var(--meta);
+  background: var(--meta-dim);
+}
 /* 노드 로딩 스피너(caret 자리) */
 .browse-tree .caret .spin {
   display: inline-block;
@@ -2307,6 +2312,57 @@ body.row-resizing * {
 /* 테이블(leaf) 행 — caret-blank + base .meta-sub2 padding(34px)로 스키마보다 깊게 들여쓴다 */
 .browse-tree .folder-row.leaf {
   cursor: default;
+}
+/* home(등록됨) 진입 버튼 — full-width secondary */
+.browse-find-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: calc(100% - 24px);
+  margin: 6px 12px 0;
+  padding: 6px;
+  font-size: 12px;
+}
+/* browse 모드 바: ← 등록됨 + 비용 캡션 */
+.browse-modebar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px 4px;
+}
+.browse-caption.inline {
+  padding: 0;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* home 빈 상태(등록 0건) CTA */
+.browse-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 28px 18px;
+  text-align: center;
+}
+.browse-empty .empty-title {
+  margin: 0;
+  color: var(--text-1);
+  font-size: 13px;
+}
+.browse-empty .empty-sub {
+  margin: 0 0 6px;
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.browse-empty .primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
 }
 .browse-tree .row-actions .mini {
   display: inline-flex;
