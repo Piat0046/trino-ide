@@ -623,13 +623,15 @@ export default function App(): JSX.Element {
     const col = t.result.columns[origIndex]
     if (!col) return
     const f: PreviewFilter = {
+      id: crypto.randomUUID(),
       column: col.name,
       op: 'eq',
       value: value != null ? String(value) : '',
       colType: col.type,
       enabled: true
     }
-    updateTab(t.id, { preview: { ...t.preview, filters: [...t.preview.filters, f] } })
+    // 컬럼 우클릭 "필터 추가"/"이 값으로 필터" → 위쪽에 한 칸씩(prepend)
+    updateTab(t.id, { preview: { ...t.preview, filters: [f, ...t.preview.filters] } })
   }
   const saveInPane = (paneId: string): void => {
     setFocusedPaneId(paneId)
@@ -1158,10 +1160,16 @@ export default function App(): JSX.Element {
       preview: t.preview !== null
     }))
     const split = panes.length > 1
+    // 프리뷰 탭은 상단(필터) 내용 높이 + 결과가 나머지 가득(고정 분할·v-splitter 없음)
+    const isPreview = !!pa?.preview
     return (
       <div
         key={pane.id}
-        className={'ws-pane' + (split && pane.id === focusedPane.id ? ' focused' : '')}
+        className={
+          'ws-pane' +
+          (isPreview ? ' preview-mode' : '') +
+          (split && pane.id === focusedPane.id ? ' focused' : '')
+        }
         style={
           {
             ...(split ? { flex: pane.id === panes[0].id ? splitRatio : 1 - splitRatio } : {}),
@@ -1232,18 +1240,20 @@ export default function App(): JSX.Element {
             onToggleInspector={() => setInspectorCollapsed((c) => !c)}
           />
         )}
-        <div
-          className="v-splitter"
-          role="separator"
-          aria-orientation="horizontal"
-          aria-label="에디터와 결과 높이 조절"
-          aria-valuemin={15}
-          aria-valuemax={85}
-          aria-valuenow={Math.round(editorRatio * 100)}
-          title="드래그로 높이 조절 · 더블클릭으로 기본 복원"
-          onMouseDown={startEditorResize}
-          onDoubleClick={() => setEditorRatio(0.4)}
-        />
+        {!isPreview && (
+          <div
+            className="v-splitter"
+            role="separator"
+            aria-orientation="horizontal"
+            aria-label="에디터와 결과 높이 조절"
+            aria-valuemin={15}
+            aria-valuemax={85}
+            aria-valuenow={Math.round(editorRatio * 100)}
+            title="드래그로 높이 조절 · 더블클릭으로 기본 복원"
+            onMouseDown={startEditorResize}
+            onDoubleClick={() => setEditorRatio(0.4)}
+          />
+        )}
         <ResultsPane
           result={pa?.result ?? null}
           error={pa?.error ?? null}

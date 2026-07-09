@@ -6,6 +6,8 @@ import { quoteIdent } from './showQueries'
 export type FilterOp = 'eq' | 'ne' | 'contains' | 'ncontains' | 'starts' | 'ends' | 'gt' | 'lt'
 
 export interface PreviewFilter {
+  /** 안정 렌더 key(prepend 시 값/포커스 어긋남 방지). SQL엔 무관 */
+  id?: string
   column: string
   op: FilterOp
   value: string

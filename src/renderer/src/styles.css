@@ -2314,6 +2314,14 @@ body.row-resizing * {
   cursor: default;
 }
 /* ===== 테이블 프리뷰(#54) ===== */
+/* 프리뷰 탭: 상단 크롬(툴바+필터)은 내용 높이, 결과가 나머지를 가득 채움(v-splitter 없음) */
+.ws-pane.preview-mode .preview-pane {
+  flex: 0 0 auto;
+}
+.ws-pane.preview-mode .results {
+  flex: 1 1 auto;
+  min-height: 0;
+}
 .preview-toolbar {
   gap: 8px;
 }
@@ -2324,6 +2332,16 @@ body.row-resizing * {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
+  flex: none;
+}
+/* 0필터 발견성 힌트(툴바 안 = 세로 공간 0, 필터 생기면 사라짐) */
+.preview-filterhint {
+  font-size: 11px;
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   min-width: 0;
 }
 .preview-limit {
@@ -2357,7 +2375,7 @@ body.row-resizing * {
   padding: 7px 12px;
   background: var(--bg-1);
   border-top: 1px solid var(--border);
-  /* flex:0 1 auto + min-height:0 → 슬롯이 짧아도 필터바가 스스로 줄고 스크롤(푸터 클리핑 방지) */
+  /* 필터 많으면 38vh로 캡+스크롤 → 프리뷰 크롬이 결과 영역을 침범하지 않음 */
   flex: 0 1 auto;
   min-height: 0;
   max-height: 38vh;
@@ -2436,48 +2454,14 @@ body.row-resizing * {
 .chip-apply:hover:not(:disabled) {
   text-decoration-style: solid;
 }
-.filter-rowbtns {
-  display: flex;
-  gap: 2px;
-  flex: none;
-}
 .filter-x {
+  flex: none;
   display: inline-flex;
   padding: 2px;
   color: var(--text-2);
 }
 .filter-x:hover:not(:disabled) {
   color: var(--accent);
-}
-.filter-add {
-  align-self: flex-start;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 12px;
-  color: var(--accent);
-  background: transparent;
-  border: 1px dashed var(--border-strong);
-  border-radius: var(--r-sm);
-  padding: 4px 9px;
-}
-.filter-add:hover:not(:disabled) {
-  background: var(--bg-2);
-}
-/* 필터 푸터 — 요약 + 필터 비우기 + 조회/중지 */
-.filter-footer {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  background: var(--bg-1);
-  border-top: 1px solid var(--border);
-}
-.filter-summary {
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--text-2);
-  white-space: nowrap;
 }
 /* home 프리뷰 가능 테이블 행 — 더블클릭 미리보기 힌트(커서) */
 .preview-leaf {

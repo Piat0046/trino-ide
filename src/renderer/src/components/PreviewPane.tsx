@@ -1,12 +1,7 @@
 import { type KeyboardEvent } from 'react'
 import { EditorTabs, type TabView } from './EditorTabs'
 import { FilterBar } from './FilterBar'
-import {
-  buildPreviewSql,
-  buildPredicate,
-  LIMIT_PRESETS,
-  type PreviewFilter
-} from '../lib/previewQuery'
+import { buildPreviewSql, LIMIT_PRESETS, type PreviewFilter } from '../lib/previewQuery'
 import type { PreviewSpec } from '../lib/tabs'
 import { IconExternal, IconPlay, IconStop } from './icons'
 
@@ -39,8 +34,9 @@ interface Props {
 }
 
 /**
- * 테이블 프리뷰 탭 상단 슬롯(#54) — 에디터 대신 [탭 스트립 + 컨트롤 바 + 필터 바 + 필터 푸터].
- * 하단 ResultsPane은 renderPane이 그대로 재사용. 서버 재조회는 "조회"(⌘↵) 명시 액션에서만.
+ * 테이블 프리뷰 탭 상단 슬롯(#54) — [탭 스트립 + 컨트롤 바 + 필터 바]만(내용 높이).
+ * 하단 ResultsPane이 나머지를 가득 채운다(고정 분할·v-splitter 없음). 필터 추가는 그리드 컬럼
+ * 우클릭으로만(위쪽에 prepend). 서버 재조회는 "조회"(⌘↵) 명시 액션에서만.
  */
 export function PreviewPane({
   tabs,
@@ -67,19 +63,6 @@ export function PreviewPane({
   // 변경 대기: 현재 필터/LIMIT로 만든 SQL이 마지막 실행 SQL과 다르면 ●
   const staged = buildPreviewSql(preview, preview.filters, preview.limit) !== lastRunSql
   const limitInPresets = LIMIT_PRESETS.includes(preview.limit)
-
-  // 푸터 요약(필터 N · 적용 M · 대기 K)
-  const applied = preview.appliedFilters ?? []
-  const appliedPreds = new Set(applied.map(buildPredicate).filter((p): p is string => p !== null))
-  let nApplied = 0
-  let nStaged = 0
-  for (const f of preview.filters) {
-    if (f.enabled === false) continue
-    const pred = buildPredicate(f)
-    if (pred === null) continue
-    if (appliedPreds.has(pred)) nApplied++
-    else nStaged++
-  }
   const hasFilters = preview.filters.length > 0
 
   const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>): void => {
@@ -107,7 +90,20 @@ export function PreviewPane({
         <span className="preview-target" title={hostLabel}>
           {hostLabel}
         </span>
+        {!hasFilters && (
+          <span className="preview-filterhint">컬럼 헤더 우클릭 → 필터 추가</span>
+        )}
         <span className="spacer" />
+        {hasFilters && (
+          <button
+            className="ghost"
+            disabled={running}
+            title="모든 필터를 지우고 다시 조회해요 · 서버 조회 1회"
+            onClick={onClear}
+          >
+            필터 비우기
+          </button>
+        )}
         <label className="preview-limit" title="표시 행 상한 (더 보려면 늘려 조회)">
           LIMIT
           <select
@@ -127,32 +123,6 @@ export function PreviewPane({
           <IconExternal size={14} />
           <span className="btn-label">SQL 편집기로 열기</span>
         </button>
-      </div>
-
-      <FilterBar
-        columns={columns}
-        filters={preview.filters}
-        appliedFilters={applied}
-        onChange={onChangeFilters}
-        onApply={onRun}
-        disabled={running}
-      />
-
-      <div className="filter-footer">
-        <span className="filter-summary">
-          {hasFilters ? `필터 ${preview.filters.length} · 적용 ${nApplied} · 대기 ${nStaged}` : '필터 없음'}
-        </span>
-        <span className="spacer" />
-        {hasFilters && (
-          <button
-            className="ghost"
-            disabled={running}
-            title="모든 필터를 지우고 다시 조회해요 · 서버 조회 1회"
-            onClick={onClear}
-          >
-            필터 비우기
-          </button>
-        )}
         {running ? (
           <button className="danger" onClick={onCancel} title="실행 중지">
             <IconStop size={13} />
@@ -174,6 +144,15 @@ export function PreviewPane({
           </button>
         )}
       </div>
+
+      <FilterBar
+        columns={columns}
+        filters={preview.filters}
+        appliedFilters={preview.appliedFilters ?? []}
+        onChange={onChangeFilters}
+        onApply={onRun}
+        disabled={running}
+      />
     </div>
   )
 }
