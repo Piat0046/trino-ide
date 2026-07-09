@@ -42,9 +42,12 @@ import {
   isDisposable,
   makeBound,
   makePane,
+  makePreview,
   makeScratch,
   nextUntitled
 } from './lib/tabs'
+import { PreviewPane } from './components/PreviewPane'
+import { buildPreviewSql, type PreviewFilter } from './lib/previewQuery'
 import { hydrateSession, serializeSession } from './lib/session'
 
 const api = window.api
@@ -464,26 +467,36 @@ export default function App(): JSX.Element {
   }
 
   // ----- query execution (탭별) -----
-  const executeQuery = async (tabId: string, sqlText: string, hostId: string): Promise<void> => {
+  const executeQuery = async (
+    tabId: string,
+    sqlText: string,
+    hostId: string,
+    recordHistory = true
+  ): Promise<void> => {
     const id = crypto.randomUUID()
     updateTab(tabId, { running: true, requestId: id, error: null, errorInfo: null, progress: null })
     try {
-      const res = await api.runQuery({ hostId, sql: sqlText, requestId: id })
+      const res = await api.runQuery({ hostId, sql: sqlText, requestId: id, recordHistory })
       if (res.ok) {
         updateTab(tabId, { result: res.value, error: null, errorInfo: null })
-        void refreshMetadata(hostId)
+        if (recordHistory) void refreshMetadata(hostId)
       } else updateTab(tabId, { error: res.error, errorInfo: res.errorInfo ?? null, result: null })
     } catch (e) {
       updateTab(tabId, { error: e instanceof Error ? e.message : String(e), result: null })
     } finally {
       updateTab(tabId, { running: false, requestId: null, progress: null })
-      void refreshHistory()
+      if (recordHistory) void refreshHistory() // 프리뷰(#54)는 history 미기록이라 재조회 불필요
     }
   }
 
-  const runFresh = (tabId: string, sqlText: string, hostId: string): void => {
+  const runFresh = (
+    tabId: string,
+    sqlText: string,
+    hostId: string,
+    recordHistory = true
+  ): void => {
     const doExecute = (): void => {
-      void executeQuery(tabId, sqlText, hostId)
+      void executeQuery(tabId, sqlText, hostId, recordHistory)
     }
     // prod로 지정 + 옵트인한 연결이면 실행 전 확인(로컬 host.env 조회만 — 서버 호출 없음)
     const host = hosts.find((h) => h.id === hostId)
@@ -531,6 +544,59 @@ export default function App(): JSX.Element {
   const cancelInPane = (paneId: string): void => {
     const t = paneOf(paneId) && activeTabOf(paneOf(paneId)!)
     if (t?.requestId) void api.cancelQuery(t.requestId)
+  }
+
+  // ----- 테이블 프리뷰(#54): recordHistory:false로 history·학습·그리드 무오염 -----
+  const openTablePreview = (catalog: string, schema: string, table: string): void => {
+    const h = browserPanelHostId
+    if (!h) return void setToast('연결을 먼저 선택하세요.')
+    // 같은 테이블 프리뷰가 이미 열려 있으면 그 탭으로 포커스(open-or-focus)
+    for (const p of panes) {
+      const found = p.tabs.find(
+        (t) =>
+          t.preview &&
+          t.hostId === h &&
+          t.preview.catalog === catalog &&
+          t.preview.schema === schema &&
+          t.preview.table === table
+      )
+      if (found) {
+        setFocusedPaneId(p.id)
+        updatePane(p.id, { activeTabId: found.id })
+        return
+      }
+    }
+    const tab = openOrReplaceInFocused(() => makePreview({ catalog, schema, table }, h))
+    updateTab(tab.id, { title: table }) // disposable 교체 시 제목 유지되는 걸 테이블명으로 강제
+    runFresh(tab.id, tab.sql, h, false)
+  }
+  const runPreview = (paneId: string): void => {
+    const t = paneOf(paneId) && activeTabOf(paneOf(paneId)!)
+    if (!t?.preview || t.running) return
+    if (!t.hostId) return void setToast('연결을 먼저 선택하세요.')
+    const sql = buildPreviewSql(t.preview, t.preview.filters, t.preview.limit)
+    updateTab(t.id, { sql }) // 마지막 실행 SQL(세션 degrade + staged 판정 기준)
+    runFresh(t.id, sql, t.hostId, false)
+  }
+  const openPreviewInEditor = (paneId: string): void => {
+    const t = paneOf(paneId) && activeTabOf(paneOf(paneId)!)
+    if (!t?.preview) return
+    const sql = buildPreviewSql(t.preview, t.preview.filters, t.preview.limit)
+    addTabToPane(paneId, makeScratch(sql, t.hostId, nextUntitled(allTitles())))
+  }
+  // 그리드 우클릭 "필터 추가"/"이 값으로 필터" → 프리뷰 필터 행 추가(값 프리필, 자동 실행 안 함)
+  const addPreviewFilter = (paneId: string, origIndex: number, value?: unknown): void => {
+    const t = paneOf(paneId) && activeTabOf(paneOf(paneId)!)
+    if (!t?.preview || !t.result) return
+    const col = t.result.columns[origIndex]
+    if (!col) return
+    const f: PreviewFilter = {
+      column: col.name,
+      op: 'eq',
+      value: value != null ? String(value) : '',
+      colType: col.type
+    }
+    updateTab(t.id, { preview: { ...t.preview, filters: [...t.preview.filters, f] } })
   }
   const saveInPane = (paneId: string): void => {
     setFocusedPaneId(paneId)
@@ -1052,7 +1118,12 @@ export default function App(): JSX.Element {
   // 한 pane(에디터+결과)을 렌더. 분할 시 창별 독립 상태/액션.
   const renderPane = (pane: Pane): JSX.Element => {
     const pa = activeTabOf(pane)
-    const views = pane.tabs.map((t) => ({ id: t.id, title: tabTitle(t), dirty: isDirty(t) }))
+    const views = pane.tabs.map((t) => ({
+      id: t.id,
+      title: tabTitle(t),
+      dirty: isDirty(t),
+      preview: t.preview !== null
+    }))
     const split = panes.length > 1
     return (
       <div
@@ -1068,33 +1139,65 @@ export default function App(): JSX.Element {
         onMouseDownCapture={() => setFocusedPaneId(pane.id)}
         onFocusCapture={() => setFocusedPaneId(pane.id)}
       >
-        <SqlEditor
-          tabs={views}
-          activeTabId={pa?.id ?? ''}
-          onSelectTab={(id) => {
-            setFocusedPaneId(pane.id)
-            updatePane(pane.id, { activeTabId: id })
-          }}
-          onCloseTab={closeTab}
-          onNewTab={() => newScratchInPane(pane.id)}
-          sql={pa?.sql ?? ''}
-          onChange={(v) => pa && updateTab(pa.id, { sql: v })}
-          onRun={(sql) => runInPane(pane.id, sql)}
-          onCancel={() => cancelInPane(pane.id)}
-          onSave={() => saveInPane(pane.id)}
-          running={pa?.running ?? false}
-          isScratch={pa ? pa.savedQueryId === null : true}
-          savedQueryId={pa?.savedQueryId ?? null}
-          onNotify={setToast}
-          hosts={hosts}
-          hostId={pa?.hostId ?? null}
-          onSelectHost={(id) => selectHostInPane(pane.id, id)}
-          metadata={metadata[pa?.hostId ?? ''] ?? null}
-          split={split}
-          onToggleSplit={toggleSplit}
-          inspectorOpen={!inspectorCollapsed}
-          onToggleInspector={() => setInspectorCollapsed((c) => !c)}
-        />
+        {pa?.preview ? (
+          <PreviewPane
+            tabs={views}
+            activeTabId={pa.id}
+            onSelectTab={(id) => {
+              setFocusedPaneId(pane.id)
+              updatePane(pane.id, { activeTabId: id })
+            }}
+            onCloseTab={closeTab}
+            onNewTab={() => newScratchInPane(pane.id)}
+            split={split}
+            onToggleSplit={toggleSplit}
+            inspectorOpen={!inspectorCollapsed}
+            onToggleInspector={() => setInspectorCollapsed((c) => !c)}
+            preview={pa.preview}
+            lastRunSql={pa.sql}
+            columns={pa.result?.columns ?? []}
+            running={pa.running}
+            hostLabel={
+              (hosts.find((h) => h.id === pa.hostId)?.name ?? '연결 없음') +
+              ` · ${pa.preview.catalog}.${pa.preview.schema}.${pa.preview.table}`
+            }
+            onChangeFilters={(filters) =>
+              updateTab(pa.id, { preview: { ...pa.preview!, filters } })
+            }
+            onChangeLimit={(limit) => updateTab(pa.id, { preview: { ...pa.preview!, limit } })}
+            onRun={() => runPreview(pane.id)}
+            onCancel={() => cancelInPane(pane.id)}
+            onOpenInEditor={() => openPreviewInEditor(pane.id)}
+          />
+        ) : (
+          <SqlEditor
+            tabs={views}
+            activeTabId={pa?.id ?? ''}
+            onSelectTab={(id) => {
+              setFocusedPaneId(pane.id)
+              updatePane(pane.id, { activeTabId: id })
+            }}
+            onCloseTab={closeTab}
+            onNewTab={() => newScratchInPane(pane.id)}
+            sql={pa?.sql ?? ''}
+            onChange={(v) => pa && updateTab(pa.id, { sql: v })}
+            onRun={(sql) => runInPane(pane.id, sql)}
+            onCancel={() => cancelInPane(pane.id)}
+            onSave={() => saveInPane(pane.id)}
+            running={pa?.running ?? false}
+            isScratch={pa ? pa.savedQueryId === null : true}
+            savedQueryId={pa?.savedQueryId ?? null}
+            onNotify={setToast}
+            hosts={hosts}
+            hostId={pa?.hostId ?? null}
+            onSelectHost={(id) => selectHostInPane(pane.id, id)}
+            metadata={metadata[pa?.hostId ?? ''] ?? null}
+            split={split}
+            onToggleSplit={toggleSplit}
+            inspectorOpen={!inspectorCollapsed}
+            onToggleInspector={() => setInspectorCollapsed((c) => !c)}
+          />
+        )}
         <div
           className="v-splitter"
           role="separator"
@@ -1114,6 +1217,9 @@ export default function App(): JSX.Element {
           running={pa?.running ?? false}
           progress={pa?.progress ?? null}
           onCancel={() => cancelInPane(pane.id)}
+          onAddFilter={
+            pa?.preview ? (origIndex, value) => addPreviewFilter(pane.id, origIndex, value) : undefined
+          }
           onSelectRecord={(snap) =>
             setRecordByPane((m) =>
               // null→null 무변경이면 같은 참조 반환(불필요한 재렌더·루프 방지)
@@ -1202,6 +1308,7 @@ export default function App(): JSX.Element {
                   setToast(`'${table}' 등록 해제됨`)
                 })
               }}
+              onPreviewTable={openTablePreview}
             />
           )}
         </aside>

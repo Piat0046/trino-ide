@@ -17,6 +17,7 @@ import {
   IconCopy,
   IconDownload,
   IconEyeOff,
+  IconFilter,
   IconSearch,
   IconStop
 } from './icons'
@@ -38,6 +39,8 @@ interface Props {
   onCancel: () => void
   /** 선택 셀이 속한 행 스냅샷을 인스펙터로 emit(선택 없으면 null). 내부 선택모델은 불변. */
   onSelectRecord?: (snap: RecordSnapshot | null) => void
+  /** 프리뷰 탭(#54)에서만 전달 — 컬럼 헤더/셀 우클릭 "필터 추가". 없으면 메뉴 항목 숨김. */
+  onAddFilter?: (origIndex: number, value?: unknown) => void
 }
 
 const HEAD_H = 42
@@ -122,7 +125,8 @@ export function ResultsPane({
   running,
   progress,
   onCancel,
-  onSelectRecord
+  onSelectRecord,
+  onAddFilter
 }: Props): JSX.Element {
   const [tab, setTab] = useState<'results' | 'messages'>('results')
   const parentRef = useRef<HTMLDivElement>(null)
@@ -1001,18 +1005,43 @@ export function ResultsPane({
               >
                 <IconCopy size={14} />열 복사
               </button>
+              {onAddFilter && (
+                <button
+                  className="ctx-item"
+                  disabled={displayRows[ctxMenu.row]?.[ctxMenu.origIndex] == null}
+                  onClick={() => {
+                    onAddFilter(ctxMenu.origIndex, displayRows[ctxMenu.row]?.[ctxMenu.origIndex])
+                    setCtxMenu(null)
+                  }}
+                >
+                  <IconFilter size={14} />이 값으로 필터
+                </button>
+              )}
             </>
           ) : (
-            <button
-              className="ctx-item"
-              disabled={visibleCols.length === 1}
-              onClick={() => {
-                toggleVisible(ctxMenu.origIndex)
-                setCtxMenu(null)
-              }}
-            >
-              <IconEyeOff size={14} />열 숨김
-            </button>
+            <>
+              {onAddFilter && (
+                <button
+                  className="ctx-item"
+                  onClick={() => {
+                    onAddFilter(ctxMenu.origIndex)
+                    setCtxMenu(null)
+                  }}
+                >
+                  <IconFilter size={14} />필터 추가
+                </button>
+              )}
+              <button
+                className="ctx-item"
+                disabled={visibleCols.length === 1}
+                onClick={() => {
+                  toggleVisible(ctxMenu.origIndex)
+                  setCtxMenu(null)
+                }}
+              >
+                <IconEyeOff size={14} />열 숨김
+              </button>
+            </>
           )}
         </div>
       )}

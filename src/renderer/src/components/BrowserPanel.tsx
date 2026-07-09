@@ -41,6 +41,8 @@ interface Props {
   onCache: (fn: (d: BrowseData) => BrowseData) => void
   onRegisterTables: (catalog: string, schema: string, tables: string[]) => void
   onUnregister: (catalog: string, schema: string, table: string) => void
+  /** home 등록 테이블 더블클릭 → 데이터 프리뷰(#54) */
+  onPreviewTable: (catalog: string, schema: string, table: string) => void
 }
 
 type NodeErr = string
@@ -60,7 +62,8 @@ export function BrowserPanel({
   cache,
   onCache,
   onRegisterTables,
-  onUnregister
+  onUnregister,
+  onPreviewTable
 }: Props): JSX.Element {
   const [mode, setMode] = useState<Mode>('home')
   const [expanded, setExpanded] = useState<Set<string>>(new Set()) // browse 펼침
@@ -477,8 +480,9 @@ export function BrowserPanel({
                             {tbls.map((tbl) => (
                               <li key={tbl} className="folder meta-sub2" role="treeitem">
                                 <div
-                                  className="folder-row leaf"
-                                  title={`${cName}.${sName}.${tbl}`}
+                                  className="folder-row leaf preview-leaf"
+                                  title={`${cName}.${sName}.${tbl} · 더블클릭 = 데이터 미리보기 (서버 조회 1회)`}
+                                  onDoubleClick={() => onPreviewTable(cName, sName, tbl)}
                                 >
                                   <span className="caret-blank" />
                                   <span className="meta-icon table">▦</span>

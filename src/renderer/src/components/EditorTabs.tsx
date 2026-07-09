@@ -4,6 +4,8 @@ export interface TabView {
   id: string
   title: string
   dirty: boolean
+  /** 테이블 프리뷰 탭이면 라벨 앞 마커(▦)로 SQL 탭과 구분(#54) */
+  preview?: boolean
 }
 
 interface Props {
@@ -43,9 +45,12 @@ export function EditorTabs({
             onAuxClick={(e) => {
               if (e.button === 1) onClose(t.id) // 가운데 클릭으로 닫기
             }}
-            title={t.title}
+            title={t.preview ? `▦ ${t.title} · 테이블 미리보기` : t.title}
           >
-            <span className="tab-name">{t.title}</span>
+            <span className="tab-name">
+              {t.preview && <span className="tab-kind" aria-hidden>▦ </span>}
+              {t.title}
+            </span>
             <span className="tab-trailing">
               {t.dirty && <span className="tab-dirty">●</span>}
               <button

@@ -1,4 +1,14 @@
 import type { QueryErrorInfo, QueryResultPayload, QueryStatsSummary } from '@shared/types'
+import { buildPreviewSql, DEFAULT_LIMIT, type PreviewFilter } from './previewQuery'
+
+/** 테이블 프리뷰 탭 상태(#54). filters/limit는 편집 대상, tab.sql=마지막 실행 SQL. */
+export interface PreviewSpec {
+  catalog: string
+  schema: string
+  table: string
+  filters: PreviewFilter[]
+  limit: number
+}
 
 /** 에디터 탭 1개 = 독립 SQL 문서. 저장 쿼리 바인딩(savedQueryId!=null) 또는 스크래치. */
 export interface EditorTab {
@@ -20,6 +30,8 @@ export interface EditorTab {
   requestId: string | null
   /** 실행 중 라이브 진행 stats(스트리밍) */
   progress: QueryStatsSummary | null
+  /** null이 아니면 테이블 프리뷰 탭(에디터 대신 필터 바). SQL 편집기 탭은 null. */
+  preview: PreviewSpec | null
 }
 
 /** 워크스페이스 분할 단위. 각 pane = 독립 탭 그룹(자체 활성 탭). 분할 시 panes.length===2. */
@@ -53,7 +65,8 @@ export function makeScratch(seedSql: string, hostId: string | null, title: strin
     errorInfo: null,
     running: false,
     requestId: null,
-    progress: null
+    progress: null,
+    preview: null
   }
 }
 
@@ -73,11 +86,38 @@ export function makeBound(
     errorInfo: null,
     running: false,
     requestId: null,
-    progress: null
+    progress: null,
+    preview: null
+  }
+}
+
+/** 테이블 프리뷰 탭. sql=초기 컴파일된 SELECT(세션 복원 시 SQL 스크래치로 degrade). */
+export function makePreview(
+  ref: { catalog: string; schema: string; table: string },
+  hostId: string | null
+): EditorTab {
+  const preview: PreviewSpec = { ...ref, filters: [], limit: DEFAULT_LIMIT }
+  const sql = buildPreviewSql(ref, preview.filters, preview.limit)
+  return {
+    id: crypto.randomUUID(),
+    savedQueryId: null,
+    title: ref.table,
+    sql,
+    baseSql: sql,
+    hostId,
+    result: null,
+    error: null,
+    errorInfo: null,
+    running: false,
+    requestId: null,
+    progress: null,
+    preview
   }
 }
 
 export function isDirty(t: EditorTab): boolean {
+  // 프리뷰 탭은 편집 문서가 아니라 dirty 개념 없음(닫기 확인 안 뜸)
+  if (t.preview) return false
   return t.sql !== t.baseSql
 }
 

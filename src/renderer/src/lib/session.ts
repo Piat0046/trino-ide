@@ -42,7 +42,8 @@ export function serializeSession(panes: Pane[], focusedPaneId: string): void {
           savedQueryId: t.savedQueryId,
           title: t.title,
           sql: t.sql,
-          baseSql: t.baseSql,
+          // 프리뷰 탭은 SQL 스크래치로 degrade → baseSql=sql로 저장해 복원 후 헛 dirty(●) 방지
+          baseSql: t.preview ? t.sql : t.baseSql,
           hostId: t.hostId
         }))
       }))
@@ -68,7 +69,9 @@ function restoreTab(t: StoredTab): EditorTab | null {
     errorInfo: null,
     running: false,
     requestId: null,
-    progress: null
+    progress: null,
+    // 프리뷰 탭은 직렬화 안 함 → 복원 시 마지막 SELECT를 담은 SQL 스크래치로 degrade(자동 재실행 0)
+    preview: null
   }
 }
 

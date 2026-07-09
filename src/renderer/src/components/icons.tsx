@@ -258,3 +258,18 @@ export const IconSitemap = ({ size }: IconProps): JSX.Element =>
     </>,
     size
   )
+
+// 외부로 열기(SQL 편집기로 열기) — 상자 밖 화살표
+export const IconExternal = ({ size }: IconProps): JSX.Element =>
+  svg(
+    <>
+      <path d="M14 4h6v6" />
+      <path d="M20 4l-9 9" />
+      <path d="M18 13v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h6" />
+    </>,
+    size
+  )
+
+// 필터(깔때기) — 프리뷰 필터 추가
+export const IconFilter = ({ size }: IconProps): JSX.Element =>
+  svg(<path d="M3 5h18l-7 8v5l-4 2v-7z" />, size)

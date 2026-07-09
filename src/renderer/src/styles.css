@@ -2313,6 +2313,99 @@ body.row-resizing * {
 .browse-tree .folder-row.leaf {
   cursor: default;
 }
+/* ===== 테이블 프리뷰(#54) ===== */
+.preview-toolbar {
+  gap: 8px;
+}
+.preview-target {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.preview-limit {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-2);
+  flex-shrink: 0;
+}
+.preview-limit select {
+  font-family: var(--mono);
+}
+/* 변경 대기 점(●) — 필터·LIMIT가 마지막 조회와 다를 때 */
+.primary.staged {
+  box-shadow: 0 0 0 1px var(--warn) inset;
+}
+.staged-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--warn);
+  flex-shrink: 0;
+}
+/* 필터 바 — ParamBar 미러 */
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  background: var(--bg-1);
+  border-top: 1px solid var(--border);
+}
+.filter-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--meta-dim);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 3px 4px 3px 7px;
+}
+.filter-row select,
+.filter-row .filter-val {
+  font-size: 12px;
+  height: 24px;
+}
+.filter-col {
+  font-family: var(--mono);
+  max-width: 140px;
+}
+.filter-val {
+  width: 120px;
+}
+.filter-x {
+  display: inline-flex;
+  padding: 2px;
+  color: var(--text-2);
+}
+.filter-x:hover:not(:disabled) {
+  color: var(--danger);
+}
+.filter-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--accent);
+  background: transparent;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r-sm);
+  padding: 4px 9px;
+}
+.filter-add:hover:not(:disabled) {
+  background: var(--bg-2);
+}
+/* home 프리뷰 가능 테이블 행 — 더블클릭 미리보기 힌트(커서) */
+.preview-leaf {
+  cursor: pointer;
+}
+
 /* home(등록됨) 진입 버튼 — full-width secondary */
 .browse-find-btn {
   display: flex;
@@ -2509,4 +2602,9 @@ body.row-resizing * {
   color: var(--t-time);
   opacity: 0.85;
   flex: none;
+}
+
+/* 프리뷰 탭 마커(▦) — 인디고로 SQL 탭과 구분(#54) */
+.tab-kind {
+  color: var(--meta);
 }
