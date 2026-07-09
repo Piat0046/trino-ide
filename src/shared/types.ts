@@ -87,6 +87,8 @@ export interface QueryResultPayload {
   rowCount: number
   /** 안전 상한(SAFETY_CAP)에 도달해 결과가 잘렸는지 여부 */
   truncated: boolean
+  /** 사용자가 실행을 중지(취소)해 중지 시점까지의 부분 결과인지 여부 */
+  cancelled: boolean
   stats?: QueryStatsSummary
   /** 실제로 서버에 보낸 SQL(재작성 없음 — 실행된 문장 그대로) */
   executedSql: string

@@ -43,6 +43,17 @@ export interface CancelToken {
   trinoQueryId?: string
 }
 
+/**
+ * trino-client의 Iterator에서 **최초 제출 응답의 query id**를 안전하게 추출한다.
+ * trino.query()는 `new Iterator(new QueryIterator(client, result))`를 돌려주고(index.js:180),
+ * 그 초기 `result`에 query id가 이미 들어 있다. 데이터 페이지가 나오기 전이라도 이 id로
+ * 서버 취소(DELETE /v1/query/{id})가 가능해진다. 내부 구조 의존이라 실패 시 undefined 폴백.
+ */
+export function initialQueryId(iter: unknown): string | undefined {
+  const id = (iter as { iter?: { queryResult?: { id?: unknown } } })?.iter?.queryResult?.id
+  return typeof id === 'string' ? id : undefined
+}
+
 function buildTrino(conn: ResolvedConn): Trino {
   const isHttps = conn.url.startsWith('https://')
   return Trino.create({
@@ -119,9 +130,17 @@ export async function runQuery(
     schema: conn.schema
   })
 
+  // 서버 취소가 데이터 페이지 도착 전에도 가능하도록 query id를 즉시 확보한다(#50).
+  // trino-client의 iterator가 무데이터 페이지를 내부 재귀로 삼켜 for-await 본문이 안 돌 수 있어,
+  // 본문에서만 잡던 token.trinoQueryId가 undefined로 남아 서버 취소(DELETE)가 스킵되던 버그를 막는다.
+  const earlyId = initialQueryId(iter)
+  if (earlyId) token.trinoQueryId = earlyId
+
   let columns: QueryResultPayload['columns'] = []
   const rows: unknown[][] = []
   let truncated = false
+  // 실제로 '중지'로 루프를 끊었을 때만 true — 완주 후 늦게 온 취소 클릭을 부분결과로 오표기하지 않는다
+  let cancelledEarly = false
   let lastStats: QueryResult['stats']
   let warnings: string[] = []
   let infoUri: string | undefined
@@ -130,7 +149,10 @@ export async function runQuery(
     if (page.id) token.trinoQueryId = page.id
     if (page.infoUri && !infoUri) infoUri = page.infoUri
     if (page.warnings && page.warnings.length) warnings = page.warnings // 누적본(최신 페이지)
-    if (token.cancelled) break
+    if (token.cancelled) {
+      cancelledEarly = true
+      break
+    }
     if (page.error) throw new TrinoQueryError(page.error)
 
     if (page.columns && columns.length === 0) {
@@ -172,6 +194,7 @@ export async function runQuery(
     rows,
     rowCount: rows.length,
     truncated,
+    cancelled: cancelledEarly,
     stats: finalStats,
     executedSql: sql,
     warnings: warnings.length ? warnings : undefined,

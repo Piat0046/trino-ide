@@ -458,8 +458,10 @@ export function ResultsPane({
   const totalWidth = ROWNUM_W + visibleCols.reduce((a, c) => a + c.width, 0)
   const baseIndex = 0 // 전체 결과가 메모리에 있으므로 행번호는 항상 1..N
   const stats = result?.stats
-  // FINISHED가 아니면(truncated/취소로 잠정) 통계가 미확정 — 배너 + 값 흐리게로 신호
-  const finished = !stats || stats.state === 'FINISHED'
+  const cancelled = result?.cancelled ?? false
+  // 중지되었거나 FINISHED가 아니면 통계가 미확정(잠정) — 배너 + 값 흐리게로 신호.
+  // (중지 시 stats가 아예 없을 수 있어 cancelled를 먼저 반영해야 '확정'으로 오표기되지 않음)
+  const finished = !cancelled && (!stats || stats.state === 'FINISHED')
   const num = (n?: number): string | null => (n == null ? null : n.toLocaleString())
   const statGroups: { title: string; items: [string, string][] }[] = stats
     ? [
@@ -679,7 +681,8 @@ export function ResultsPane({
               <div className="msg-status">
                 <span className={'msg-badge ' + (finished ? 'ok' : 'warn')}>
                   <span className="msg-badge-dot" />
-                  {finished ? '확정' : '잠정'} · {stats?.state ?? 'FINISHED'}
+                  {cancelled ? '중지됨' : finished ? '확정' : '잠정'} ·{' '}
+                  {cancelled ? 'CANCELED' : (stats?.state ?? 'FINISHED')}
                 </span>
                 {result.queryId && (
                   <button
@@ -692,9 +695,15 @@ export function ResultsPane({
                 )}
               </div>
 
-              {!finished && (
+              {cancelled && (
                 <div className="warn-banner">
-                  결과를 끝까지 받지 않아 통계가 확정되지 않았습니다 (LIMIT 도달 또는 취소). 아래 값은
+                  ⏹ 실행을 중지했습니다. 아래 통계·결과는 중지 시점까지 받은 부분값이며, 통계는
+                  하한입니다.
+                </div>
+              )}
+              {!finished && !cancelled && (
+                <div className="warn-banner">
+                  결과를 끝까지 받지 않아 통계가 확정되지 않았습니다 (LIMIT 도달). 아래 값은
                   하한입니다.
                 </div>
               )}
@@ -840,6 +849,12 @@ export function ResultsPane({
           </div>
         ) : (
           <>
+            {cancelled && (
+              <div className="warn-banner">
+                ⏹ 실행을 중지했습니다 — 아래는 중지 시점까지 받은 {result.rowCount.toLocaleString()}
+                행입니다.
+              </div>
+            )}
             <div className="grid-wrap" ref={parentRef} tabIndex={0} onKeyDown={onGridKey}>
               <div className="grid2" style={{ width: totalWidth, minWidth: '100%' }}>
                 <div className="grid2-head" style={{ gridTemplateColumns: template, height: HEAD_H }}>
@@ -1006,8 +1021,19 @@ export function ResultsPane({
         <div className="transport">
           <span
             className={'ft-state ' + (finished ? 'ok' : 'warn')}
-            title={finished ? '확정된 통계' : '잠정(부분 통계) — 끝까지 수신 안 됨'}
+            title={
+              cancelled
+                ? '실행 중지됨 — 중지 시점까지의 부분 결과'
+                : finished
+                  ? '확정된 통계'
+                  : '잠정(부분 통계) — 끝까지 수신 안 됨'
+            }
           />
+          {cancelled && (
+            <span className="stat" style={{ color: 'var(--warn)' }} title="사용자가 실행을 중지했습니다">
+              ⏹ 중지됨
+            </span>
+          )}
           {result.warnings && result.warnings.length > 0 && (
             <span className="ft-warn" title="Trino 경고 있음(Messages 참고)">
               ⚠ {result.warnings.length}
@@ -1017,7 +1043,9 @@ export function ResultsPane({
             <b>{result.rowCount.toLocaleString()}</b> {result.truncated ? 'rows (상한)' : 'rows'}
           </span>
           {sort && (
-            <span className="stat sort-note">{result.truncated ? '받은 행만 정렬' : '정렬됨'}</span>
+            <span className="stat sort-note">
+              {result.truncated || cancelled ? '받은 행만 정렬' : '정렬됨'}
+            </span>
           )}
           {result.truncated && (
             <span
