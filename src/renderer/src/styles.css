@@ -2271,6 +2271,81 @@ body.row-resizing * {
   color: var(--text-1);
   font-size: 12px;
 }
+/* ===== 메타데이터 조회 모달(#52) ===== */
+.meta-probe {
+  width: 480px;
+}
+.probe-sub {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.probe-sub code {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-1);
+  background: var(--bg-0);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 5px 8px;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.probe-cost {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--warn);
+  background: var(--warn-dim);
+  border: 1px solid var(--warn);
+  border-radius: var(--r-sm);
+  padding: 3px 7px;
+  white-space: nowrap;
+}
+.probe-find {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  padding: 4px 8px;
+}
+.probe-list {
+  max-height: 320px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.probe-item {
+  padding: 5px 6px;
+  border-radius: var(--r-sm);
+}
+.probe-item:hover {
+  background: var(--bg-2);
+}
+.probe-item.already {
+  opacity: 0.55;
+}
+.probe-name {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.probe-count {
+  font-size: 11px;
+  color: var(--text-2);
+  font-family: var(--mono);
+}
+.probe-cancel,
+.probe-retry {
+  margin-left: 10px;
+  padding: 2px 8px;
+  font-size: 11px;
+}
+
 .modal label.checkbox input {
   width: auto;
 }

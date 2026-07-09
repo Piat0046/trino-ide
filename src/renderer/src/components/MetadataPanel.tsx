@@ -3,6 +3,7 @@ import type { HostConfig, HostMetadata, MetadataRef } from '@shared/types'
 import {
   IconChevronDown,
   IconChevronRight,
+  IconServerFetch,
   IconPencil,
   IconPlus,
   IconSearch,
@@ -17,6 +18,9 @@ interface Props {
   onSelectHost: (id: string) => void
   onAddSchema: (catalog: string) => void
   onAddTable: (catalog: string, schema: string) => void
+  /** 서버 SHOW로 목록 조회(명시 옵트인) → 골라 등록 */
+  onProbeSchemas: (catalog: string) => void
+  onProbeTables: (catalog: string, schema: string) => void
   /** 컬럼 추가(existing 없음) 또는 편집(existing 있음) */
   onColumnEdit: (
     catalog: string,
@@ -40,6 +44,8 @@ export function MetadataPanel({
   onSelectHost,
   onAddSchema,
   onAddTable,
+  onProbeSchemas,
+  onProbeTables,
   onColumnEdit,
   onRename,
   onDelete
@@ -117,7 +123,7 @@ export function MetadataPanel({
           const cOpen = !collapsed.has(cKey) || !!q
           return (
             <li key={cKey} className="folder">
-              <div className="folder-row" onClick={() => toggle(cKey)}>
+              <div className="folder-row" onClick={() => toggle(cKey)} title={catName}>
                 <span className="caret">
                   {cOpen ? <IconChevronDown size={13} /> : <IconChevronRight size={13} />}
                 </span>
@@ -126,6 +132,16 @@ export function MetadataPanel({
                 {cat.source === 'manual' && <span className="meta-badge">수동</span>}
                 <span className="folder-count">{schemas.length}</span>
                 <div className="row-actions">
+                  <button
+                    className="mini"
+                    title="스키마 조회(서버 SHOW 1회)"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onProbeSchemas(catName)
+                    }}
+                  >
+                    <IconServerFetch size={12} />
+                  </button>
                   <button
                     className="mini"
                     title="스키마 추가(수동)"
@@ -168,7 +184,7 @@ export function MetadataPanel({
                     const sOpen = !collapsed.has(sKey) || !!q
                     return (
                       <li key={sKey} className="folder meta-sub">
-                        <div className="folder-row" onClick={() => toggle(sKey)}>
+                        <div className="folder-row" onClick={() => toggle(sKey)} title={schName}>
                           <span className="caret">
                             {sOpen ? <IconChevronDown size={12} /> : <IconChevronRight size={12} />}
                           </span>
@@ -181,6 +197,16 @@ export function MetadataPanel({
                           {sch.source === 'manual' && <span className="meta-badge">수동</span>}
                           <span className="folder-count">{tables.length}</span>
                           <div className="row-actions">
+                            <button
+                              className="mini"
+                              title="테이블 조회(서버 SHOW 1회)"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                onProbeTables(catName, schName)
+                              }}
+                            >
+                              <IconServerFetch size={12} />
+                            </button>
                             <button
                               className="mini"
                               title="테이블 추가(수동)"

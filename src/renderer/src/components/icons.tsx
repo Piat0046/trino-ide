@@ -245,3 +245,16 @@ export const IconPanelRight = ({ size }: IconProps): JSX.Element =>
     </>,
     size
   )
+
+// 메타데이터 서버 조회(SHOW) — DB 실린더 + 하강 화살표(서버에서 목록을 당겨온다). 내보내기(IconDownload)와 구분.
+export const IconServerFetch = ({ size }: IconProps): JSX.Element =>
+  svg(
+    <>
+      <ellipse cx="8" cy="5" rx="5" ry="2" />
+      <path d="M3 5v6c0 1.1 2.24 2 5 2" />
+      <path d="M3 11v6c0 1.1 2.24 2 5 2 .6 0 1.17-.04 1.7-.12" />
+      <path d="M17 12v7" />
+      <path d="M14 16l3 3 3-3" />
+    </>,
+    size
+  )
