@@ -143,5 +143,6 @@ export function buildPreviewSql(
   const n = Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : DEFAULT_LIMIT
   const p = Number.isFinite(page) && page > 0 ? Math.floor(page) : 0
   const offset = p > 0 ? ` OFFSET ${p * n}` : ''
-  return `SELECT * FROM ${table}${where}${orderClause} LIMIT ${n}${offset}`
+  // Trino는 OFFSET이 LIMIT 앞에 와야 한다(… ORDER BY … OFFSET m LIMIT n). MySQL식 LIMIT n OFFSET m은 문법오류.
+  return `SELECT * FROM ${table}${where}${orderClause}${offset} LIMIT ${n}`
 }
