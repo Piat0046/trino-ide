@@ -8,6 +8,8 @@ export interface PreviewSpec {
   table: string
   filters: PreviewFilter[]
   limit: number
+  /** 마지막 조회 시 실제 적용된(enabled+유효) 필터 스냅샷 — 행별 적용됨/대기 판정용 */
+  appliedFilters?: PreviewFilter[]
 }
 
 /** 에디터 탭 1개 = 독립 SQL 문서. 저장 쿼리 바인딩(savedQueryId!=null) 또는 스크래치. */

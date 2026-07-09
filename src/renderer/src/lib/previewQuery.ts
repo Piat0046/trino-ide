@@ -11,6 +11,8 @@ export interface PreviewFilter {
   value: string
   /** 컬럼 타입(값 인용/CAST 판정용). 없으면 문자열로 취급 */
   colType?: string
+  /** 체크박스 off면 WHERE에서 제외(행·값은 보존). undefined=사용(true) */
+  enabled?: boolean
 }
 
 export interface PreviewRef {
@@ -91,7 +93,10 @@ export function buildPredicate(f: PreviewFilter): string | null {
 export function buildPreviewSql(ref: PreviewRef, filters: PreviewFilter[], limit: number): string {
   const table =
     quoteIdent(ref.catalog) + '.' + quoteIdent(ref.schema) + '.' + quoteIdent(ref.table)
-  const preds = filters.map(buildPredicate).filter((p): p is string => p !== null)
+  const preds = filters
+    .filter((f) => f.enabled !== false) // 체크 해제 행은 제외
+    .map(buildPredicate)
+    .filter((p): p is string => p !== null)
   const where = preds.length ? ' WHERE ' + preds.join(' AND ') : ''
   const n = Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : DEFAULT_LIMIT
   return `SELECT * FROM ${table}${where} LIMIT ${n}`

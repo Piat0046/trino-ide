@@ -48,7 +48,7 @@ import {
 } from './lib/tabs'
 import { PreviewPane } from './components/PreviewPane'
 import { RegisterTableDialog } from './components/RegisterTableDialog'
-import { buildPreviewSql, type PreviewFilter } from './lib/previewQuery'
+import { buildPreviewSql, buildPredicate, type PreviewFilter } from './lib/previewQuery'
 import { hydrateSession, serializeSession } from './lib/session'
 
 const api = window.api
@@ -473,7 +473,8 @@ export default function App(): JSX.Element {
     tabId: string,
     sqlText: string,
     hostId: string,
-    recordHistory = true
+    recordHistory = true,
+    previewApplied: PreviewFilter[] | null = null
   ): Promise<void> => {
     const id = crypto.randomUUID()
     updateTab(tabId, { running: true, requestId: id, error: null, errorInfo: null, progress: null })
@@ -481,6 +482,24 @@ export default function App(): JSX.Element {
       const res = await api.runQuery({ hostId, sql: sqlText, requestId: id, recordHistory })
       if (res.ok) {
         updateTab(tabId, { result: res.value, error: null, errorInfo: null })
+        // 프리뷰: 실제 실행 성공 시에만 run SQL + 적용 스냅샷 커밋 → prod 확인취소·에러 시 거짓 "적용됨" 방지
+        if (previewApplied !== null) {
+          setPanes((prev) =>
+            prev.map((p) => ({
+              ...p,
+              tabs: p.tabs.map((t) =>
+                t.id === tabId && t.preview
+                  ? {
+                      ...t,
+                      sql: sqlText,
+                      baseSql: sqlText,
+                      preview: { ...t.preview, appliedFilters: previewApplied }
+                    }
+                  : t
+              )
+            }))
+          )
+        }
         if (recordHistory) void refreshMetadata(hostId)
       } else updateTab(tabId, { error: res.error, errorInfo: res.errorInfo ?? null, result: null })
     } catch (e) {
@@ -495,10 +514,11 @@ export default function App(): JSX.Element {
     tabId: string,
     sqlText: string,
     hostId: string,
-    recordHistory = true
+    recordHistory = true,
+    previewApplied: PreviewFilter[] | null = null
   ): void => {
     const doExecute = (): void => {
-      void executeQuery(tabId, sqlText, hostId, recordHistory)
+      void executeQuery(tabId, sqlText, hostId, recordHistory, previewApplied)
     }
     // prod로 지정 + 옵트인한 연결이면 실행 전 확인(로컬 host.env 조회만 — 서버 호출 없음)
     const host = hosts.find((h) => h.id === hostId)
@@ -570,15 +590,25 @@ export default function App(): JSX.Element {
     }
     const tab = openOrReplaceInFocused(() => makePreview({ catalog, schema, table }, h))
     updateTab(tab.id, { title: table }) // disposable 교체 시 제목 유지되는 걸 테이블명으로 강제
-    runFresh(tab.id, tab.sql, h, false)
+    runFresh(tab.id, tab.sql, h, false, []) // 초기 프리뷰: 필터 없음(성공 시 appliedFilters:[] 커밋)
   }
   const runPreview = (paneId: string): void => {
     const t = paneOf(paneId) && activeTabOf(paneOf(paneId)!)
     if (!t?.preview || t.running) return
     if (!t.hostId) return void setToast('연결을 먼저 선택하세요.')
     const sql = buildPreviewSql(t.preview, t.preview.filters, t.preview.limit)
-    updateTab(t.id, { sql }) // 마지막 실행 SQL(세션 degrade + staged 판정 기준)
-    runFresh(t.id, sql, t.hostId, false)
+    // 이번 조회에 실제 적용된(enabled+유효) 필터 스냅샷 — 실행 성공 시에만 커밋(거짓 적용됨 방지)
+    const appliedFilters = t.preview.filters.filter(
+      (f) => f.enabled !== false && buildPredicate(f) !== null
+    )
+    runFresh(t.id, sql, t.hostId, false, appliedFilters)
+  }
+  const clearPreviewFilters = (paneId: string): void => {
+    const t = paneOf(paneId) && activeTabOf(paneOf(paneId)!)
+    if (!t?.preview || t.running || !t.hostId) return
+    updateTab(t.id, { preview: { ...t.preview, filters: [] } }) // 필터 목록만 즉시 비움(로컬)
+    const sql = buildPreviewSql(t.preview, [], t.preview.limit) // filters=[] → WHERE 없음
+    runFresh(t.id, sql, t.hostId, false, []) // sql·appliedFilters 커밋은 실행 성공 시
   }
   const openPreviewInEditor = (paneId: string): void => {
     const t = paneOf(paneId) && activeTabOf(paneOf(paneId)!)
@@ -596,7 +626,8 @@ export default function App(): JSX.Element {
       column: col.name,
       op: 'eq',
       value: value != null ? String(value) : '',
-      colType: col.type
+      colType: col.type,
+      enabled: true
     }
     updateTab(t.id, { preview: { ...t.preview, filters: [...t.preview.filters, f] } })
   }
@@ -1169,6 +1200,7 @@ export default function App(): JSX.Element {
             onChangeLimit={(limit) => updateTab(pa.id, { preview: { ...pa.preview!, limit } })}
             onRun={() => runPreview(pane.id)}
             onCancel={() => cancelInPane(pane.id)}
+            onClear={() => clearPreviewFilters(pane.id)}
             onOpenInEditor={() => openPreviewInEditor(pane.id)}
           />
         ) : (

@@ -2349,35 +2349,97 @@ body.row-resizing * {
   flex-shrink: 0;
 }
 /* 필터 바 — ParamBar 미러 */
+/* 필터 바 — 온디맨드 행(각 행 전폭 스택), 많으면 캡+스크롤(결과·푸터 침범 방지) */
 .filter-bar {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
+  flex-direction: column;
+  gap: 5px;
   padding: 7px 12px;
   background: var(--bg-1);
   border-top: 1px solid var(--border);
+  /* flex:0 1 auto + min-height:0 → 슬롯이 짧아도 필터바가 스스로 줄고 스크롤(푸터 클리핑 방지) */
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 38vh;
+  overflow-y: auto;
 }
 .filter-row {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 4px;
-  background: var(--meta-dim);
+  gap: 6px;
+  padding: 3px 6px;
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
-  padding: 3px 4px 3px 7px;
+}
+.filter-row.st-applied {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+}
+.filter-row.st-staged {
+  background: var(--warn-dim);
+}
+/* 꺼진 행: 조건 부분만 흐리게(되살리는 체크박스·삭제 버튼은 대비 유지) */
+.filter-row.st-off .filter-col,
+.filter-row.st-off .filter-op,
+.filter-row.st-off .filter-val {
+  opacity: 0.5;
 }
 .filter-row select,
 .filter-row .filter-val {
   font-size: 12px;
   height: 24px;
 }
+.filter-on {
+  flex: none;
+  margin: 0;
+}
 .filter-col {
+  flex: 0 1 130px;
+  min-width: 68px;
   font-family: var(--mono);
-  max-width: 140px;
+}
+.filter-op {
+  flex: 0 1 108px;
+  min-width: 68px;
 }
 .filter-val {
-  width: 120px;
+  flex: 1 1 auto;
+  min-width: 56px;
+}
+.filter-chip {
+  flex: none;
+  min-width: 56px;
+  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+}
+.chip-applied {
+  color: var(--accent);
+}
+.chip-hint {
+  color: var(--text-2);
+  font-size: 10px;
+}
+.chip-apply {
+  color: var(--warn);
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-size: 11px;
+  cursor: pointer;
+  /* 클릭 가능(조회) 어포던스 — 점선 밑줄 상시, hover 시 실선 */
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+.chip-apply:hover:not(:disabled) {
+  text-decoration-style: solid;
+}
+.filter-rowbtns {
+  display: flex;
+  gap: 2px;
+  flex: none;
 }
 .filter-x {
   display: inline-flex;
@@ -2385,9 +2447,10 @@ body.row-resizing * {
   color: var(--text-2);
 }
 .filter-x:hover:not(:disabled) {
-  color: var(--danger);
+  color: var(--accent);
 }
 .filter-add {
+  align-self: flex-start;
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -2400,6 +2463,21 @@ body.row-resizing * {
 }
 .filter-add:hover:not(:disabled) {
   background: var(--bg-2);
+}
+/* 필터 푸터 — 요약 + 필터 비우기 + 조회/중지 */
+.filter-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--bg-1);
+  border-top: 1px solid var(--border);
+}
+.filter-summary {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-2);
+  white-space: nowrap;
 }
 /* home 프리뷰 가능 테이블 행 — 더블클릭 미리보기 힌트(커서) */
 .preview-leaf {
