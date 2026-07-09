@@ -41,6 +41,28 @@ export function prettyValue(v: unknown): string {
   return String(v)
 }
 
+/** 문자열이 JSON 객체/배열 형태로 보이는지(pretty 버튼 노출 판정 — 값싼 휴리스틱). */
+export function looksLikeJson(v: unknown): boolean {
+  if (typeof v !== 'string') return false
+  const t = v.trim()
+  return t.startsWith('{') || t.startsWith('[')
+}
+
+/**
+ * 문자열을 JSON으로 파싱해 pretty-print. 파싱 실패하거나 객체/배열이 아니면 ok:false.
+ * (varchar에 담긴 JSON을 사용자가 pretty로 볼 때 사용)
+ */
+export function tryPrettyJson(v: unknown): { ok: boolean; text: string } {
+  if (typeof v !== 'string') return { ok: false, text: '' }
+  try {
+    const parsed = JSON.parse(v)
+    if (parsed === null || typeof parsed !== 'object') return { ok: false, text: '' }
+    return { ok: true, text: JSON.stringify(parsed, null, 2) }
+  } catch {
+    return { ok: false, text: '' }
+  }
+}
+
 // ----- 레코드 스냅샷(선택 행 → 인스펙터로 emit-up하는 파생 값) -----
 
 export interface RecordField {

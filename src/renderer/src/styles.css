@@ -369,6 +369,10 @@ select {
 .insp-copy:hover {
   color: var(--accent);
 }
+/* 값 영역: 박스 + 우상단 Pretty 버튼(박스 안) + 인라인 에러 */
+.insp-value-wrap {
+  position: relative;
+}
 /* 값은 입력창 같은 박스로 감싸 키(필드명)와 시각적으로 분리 */
 .insp-value {
   font-family: var(--mono);
@@ -386,6 +390,38 @@ select {
 .insp-value.null {
   color: var(--text-2);
   font-style: italic;
+}
+/* 박스 우상단 Pretty 토글(박스 안, 값 위에 떠 있되 solid bg로 가독) */
+.insp-pretty {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 1;
+  padding: 1px 7px;
+  font-size: 10px;
+  font-family: var(--mono);
+  color: var(--text-2);
+  background: var(--bg-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  opacity: 0.85;
+}
+.insp-pretty:hover {
+  color: var(--text-0);
+  opacity: 1;
+}
+.insp-pretty.active {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-dim);
+  opacity: 1;
+}
+/* JSON 파싱 실패 시 그 자리에 작게 안내(팝업 아님) */
+.insp-pretty-err {
+  margin-top: 4px;
+  font-size: 10px;
+  color: var(--warn);
 }
 .insp-footer {
   flex-shrink: 0;
