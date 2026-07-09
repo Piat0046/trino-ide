@@ -23,16 +23,16 @@ export interface PreviewRef {
   table: string
 }
 
-/** UI 드롭다운용 조건 라벨(사용자 표기 유지) */
+/** UI 드롭다운용 조건 라벨 — 비교는 부등호, LIKE 계열은 영어 */
 export const FILTER_OPS: { op: FilterOp; label: string }[] = [
-  { op: 'eq', label: '동일' },
-  { op: 'ne', label: '미동일' },
-  { op: 'contains', label: '포함' },
-  { op: 'ncontains', label: '미포함' },
-  { op: 'starts', label: '앞에서부터 포함' },
-  { op: 'ends', label: '뒤에서부터 포함' },
-  { op: 'gt', label: '크다' },
-  { op: 'lt', label: '작다' }
+  { op: 'eq', label: '=' },
+  { op: 'ne', label: '≠' },
+  { op: 'gt', label: '>' },
+  { op: 'lt', label: '<' },
+  { op: 'contains', label: 'contains' },
+  { op: 'ncontains', label: 'not contains' },
+  { op: 'starts', label: 'starts with' },
+  { op: 'ends', label: 'ends with' }
 ]
 
 export const LIMIT_PRESETS = [100, 500, 1000, 5000, 10000]
