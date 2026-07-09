@@ -26,8 +26,7 @@ import { HostDialog } from './components/HostDialog'
 import { SqlEditor } from './components/SqlEditor'
 import { scanParams } from './lib/queryParams'
 import { ResultsPane } from './components/ResultsPane'
-import { RightRail, type InspectorTab } from './components/RightRail'
-import { InspectorPanel } from './components/InspectorPanel'
+import { InspectorPanel, type InspectorTab } from './components/InspectorPanel'
 import type { RecordSnapshot } from './lib/cellFormat'
 import { StatusBar } from './components/StatusBar'
 import { SaveQueryDialog, type SaveQueryResult } from './components/SaveQueryDialog'
@@ -879,17 +878,6 @@ export default function App(): JSX.Element {
     localStorage.setItem('inspectorTab', inspectorTab)
   }, [inspectorTab])
 
-  // 우측 레일 아이콘: 접혀 있거나 다른 탭이면 그 탭으로 펼침, 활성 탭 재클릭이면 접기
-  const onInspectorRail = (next: InspectorTab): void => {
-    if (inspectorCollapsed) {
-      setInspectorCollapsed(false)
-      setInspectorTab(next)
-    } else if (next === inspectorTab) {
-      setInspectorCollapsed(true)
-    } else {
-      setInspectorTab(next)
-    }
-  }
   // ⌘⌥B: 인스펙터 토글
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
@@ -1074,6 +1062,8 @@ export default function App(): JSX.Element {
           metadata={metadata[pa?.hostId ?? ''] ?? null}
           split={split}
           onToggleSplit={toggleSplit}
+          inspectorOpen={!inspectorCollapsed}
+          onToggleInspector={() => setInspectorCollapsed((c) => !c)}
         />
         <div
           className="v-splitter"
@@ -1199,6 +1189,7 @@ export default function App(): JSX.Element {
             <InspectorPanel
               tab={inspectorTab}
               onTab={setInspectorTab}
+              onClose={() => setInspectorCollapsed(true)}
               record={recordByPane[focusedPaneId] ?? null}
               hasResult={activeTab?.result != null}
               hasRows={(activeTab?.result?.rowCount ?? 0) > 0}
@@ -1207,11 +1198,6 @@ export default function App(): JSX.Element {
             />
           </div>
         )}
-        <RightRail
-          active={inspectorTab}
-          collapsed={inspectorCollapsed}
-          onSelect={onInspectorRail}
-        />
       </div>
 
       <StatusBar

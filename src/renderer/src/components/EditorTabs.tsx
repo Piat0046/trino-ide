@@ -1,4 +1,4 @@
-import { IconPlus, IconSplit, IconX } from './icons'
+import { IconPanelRight, IconPlus, IconSplit, IconX } from './icons'
 
 export interface TabView {
   id: string
@@ -15,6 +15,9 @@ interface Props {
   /** 세로 분할 상태 + 토글(우상단) */
   split?: boolean
   onToggleSplit?: () => void
+  /** 우측 인스펙터 사이드바 열림 상태 + 토글 */
+  inspectorOpen?: boolean
+  onToggleInspector?: () => void
 }
 
 export function EditorTabs({
@@ -24,7 +27,9 @@ export function EditorTabs({
   onClose,
   onNew,
   split,
-  onToggleSplit
+  onToggleSplit,
+  inspectorOpen,
+  onToggleInspector
 }: Props): JSX.Element {
   return (
     <div className="tabstrip">
@@ -70,6 +75,16 @@ export function EditorTabs({
             onClick={onToggleSplit}
           >
             <IconSplit size={15} />
+          </button>
+        )}
+        {onToggleInspector && (
+          <button
+            className={'tab-split' + (inspectorOpen ? ' active' : '')}
+            title={inspectorOpen ? '사이드바 닫기 (⌘⌥B)' : '사이드바 열기 (⌘⌥B)'}
+            aria-pressed={inspectorOpen}
+            onClick={onToggleInspector}
+          >
+            <IconPanelRight size={15} />
           </button>
         )}
       </div>

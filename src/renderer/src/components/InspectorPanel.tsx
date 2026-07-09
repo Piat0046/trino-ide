@@ -1,14 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { RecordSnapshot } from '../lib/cellFormat'
 import { typeClass, isNullish, prettyValue } from '../lib/cellFormat'
-import type { InspectorTab } from './RightRail'
-import { IconCopy, IconSearch } from './icons'
+import { IconCopy, IconInfo, IconSearch, IconSparkles, IconX } from './icons'
 
 const api = window.api
+
+export type InspectorTab = 'details' | 'assistant'
 
 interface Props {
   tab: InspectorTab
   onTab: (tab: InspectorTab) => void
+  /** 사이드바 닫기(툴바 토글과 별개로 패널 안에서도 닫기) */
+  onClose: () => void
   /** 포커스 pane 활성 탭의 선택 행 스냅샷(없으면 null) */
   record: RecordSnapshot | null
   /** 포커스 탭에 결과가 있는지(빈 상태 카피 분기) */
@@ -23,6 +26,7 @@ interface Props {
 export function InspectorPanel({
   tab,
   onTab,
+  onClose,
   record,
   hasResult,
   hasRows,
@@ -30,36 +34,55 @@ export function InspectorPanel({
   hasError
 }: Props): JSX.Element {
   return (
-    <aside className="inspector" role="complementary" aria-label="레코드 상세">
-      <div className="results-tabs insp-tabs" role="tablist" aria-label="인스펙터">
-        <button
-          className={'results-tab' + (tab === 'details' ? ' active' : '')}
-          role="tab"
-          aria-selected={tab === 'details'}
-          onClick={() => onTab('details')}
-        >
-          Details
-        </button>
-        <button
-          className={'results-tab' + (tab === 'assistant' ? ' active' : '')}
-          role="tab"
-          aria-selected={tab === 'assistant'}
-          onClick={() => onTab('assistant')}
-        >
-          Assistant
+    <aside className="inspector" role="complementary" aria-label="인스펙터">
+      <div className="results-tabs insp-tabs">
+        <div className="insp-tablist" role="tablist" aria-label="인스펙터">
+          <button
+            id="insp-tab-details"
+            className={'results-tab' + (tab === 'details' ? ' active' : '')}
+            role="tab"
+            aria-selected={tab === 'details'}
+            aria-controls="insp-panel"
+            onClick={() => onTab('details')}
+          >
+            <IconInfo size={13} />
+            Details
+          </button>
+          <button
+            id="insp-tab-assistant"
+            className={'results-tab' + (tab === 'assistant' ? ' active' : '')}
+            role="tab"
+            aria-selected={tab === 'assistant'}
+            aria-controls="insp-panel"
+            onClick={() => onTab('assistant')}
+          >
+            <IconSparkles size={13} />
+            Assistant
+          </button>
+        </div>
+        <span className="insp-tabs-spacer" />
+        <button className="insp-close" title="사이드바 닫기 (⌘⌥B)" aria-label="사이드바 닫기" onClick={onClose}>
+          <IconX size={14} />
         </button>
       </div>
-      {tab === 'details' ? (
-        <DetailsTab
-          record={record}
-          hasResult={hasResult}
-          hasRows={hasRows}
-          running={running}
-          hasError={hasError}
-        />
-      ) : (
-        <AssistantTab />
-      )}
+      <div
+        className="insp-panel"
+        id="insp-panel"
+        role="tabpanel"
+        aria-labelledby={tab === 'details' ? 'insp-tab-details' : 'insp-tab-assistant'}
+      >
+        {tab === 'details' ? (
+          <DetailsTab
+            record={record}
+            hasResult={hasResult}
+            hasRows={hasRows}
+            running={running}
+            hasError={hasError}
+          />
+        ) : (
+          <AssistantTab />
+        )}
+      </div>
     </aside>
   )
 }

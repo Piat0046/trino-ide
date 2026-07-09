@@ -62,6 +62,9 @@ interface Props {
   // 세로 분할 토글(탭 스트립 우상단)
   split?: boolean
   onToggleSplit?: () => void
+  // 우측 인스펙터 사이드바 토글(탭 스트립 우상단)
+  inspectorOpen?: boolean
+  onToggleInspector?: () => void
 }
 
 /** LIMIT 미지정 경고 문구(심각도 등급별). LIMIT을 SQL에 쓰면 서버 pushdown으로 부하가 준다는 걸 앞세운다. */
@@ -95,7 +98,9 @@ export function SqlEditor({
   onSelectHost,
   metadata,
   split,
-  onToggleSplit
+  onToggleSplit,
+  inspectorOpen,
+  onToggleInspector
 }: Props): JSX.Element {
   const cmRef = useRef<ReactCodeMirrorRef>(null)
   const editorPaneRef = useRef<HTMLDivElement>(null)
@@ -310,6 +315,8 @@ export function SqlEditor({
         onNew={onNewTab}
         split={split}
         onToggleSplit={onToggleSplit}
+        inspectorOpen={inspectorOpen}
+        onToggleInspector={onToggleInspector}
       />
 
       <div className="toolbar">

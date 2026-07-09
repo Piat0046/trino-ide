@@ -235,3 +235,13 @@ export const IconSparkles = ({ size }: IconProps): JSX.Element =>
     </>,
     size
   )
+
+// 우측 사이드바(인스펙터) 열기/닫기 토글 — 오른쪽 패널이 강조된 사각형
+export const IconPanelRight = ({ size }: IconProps): JSX.Element =>
+  svg(
+    <>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M15 4v16" />
+    </>,
+    size
+  )
