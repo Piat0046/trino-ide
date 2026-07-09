@@ -1,6 +1,6 @@
-import { IconBookmark, IconClock, IconDatabase, IconLayers } from './icons'
+import { IconBookmark, IconClock, IconDatabase, IconLayers, IconSitemap } from './icons'
 
-export type ExplorerSection = 'connections' | 'saved' | 'history' | 'metadata'
+export type ExplorerSection = 'connections' | 'saved' | 'history' | 'metadata' | 'browser'
 
 interface Props {
   active: ExplorerSection
@@ -13,7 +13,8 @@ const ITEMS: { key: ExplorerSection; label: string; icon: JSX.Element }[] = [
   { key: 'connections', label: 'Connections', icon: <IconDatabase /> },
   { key: 'saved', label: 'Saved queries', icon: <IconBookmark /> },
   { key: 'history', label: 'History', icon: <IconClock /> },
-  { key: 'metadata', label: 'Metadata', icon: <IconLayers /> }
+  { key: 'metadata', label: 'Metadata', icon: <IconLayers /> },
+  { key: 'browser', label: 'Browser (서버 탐색)', icon: <IconSitemap /> }
 ]
 
 export function ActivityRail({ active, collapsed = false, onChange }: Props): JSX.Element {

@@ -31,11 +31,10 @@ import type { RecordSnapshot } from './lib/cellFormat'
 import { StatusBar } from './components/StatusBar'
 import { SaveQueryDialog, type SaveQueryResult } from './components/SaveQueryDialog'
 import { PromptDialog } from './components/PromptDialog'
-import { MetaProbeDialog } from './components/MetaProbeDialog'
-import { showCatalogsSql, showSchemasSql, showTablesSql } from './lib/showQueries'
+import { BrowserPanel, emptyBrowse, type BrowseData } from './components/BrowserPanel'
 import { CloseTabDialog } from './components/CloseTabDialog'
 import { ConfirmDialog, type ConfirmConfig } from './components/ConfirmDialog'
-import { IconChevronLeft, IconPlus, IconRefresh, IconServerFetch, IconTrash } from './components/icons'
+import { IconChevronLeft, IconPlus, IconRefresh, IconTrash } from './components/icons'
 import {
   type EditorTab,
   type Pane,
@@ -67,13 +66,6 @@ interface PromptConfig {
   onSubmit: (value: string) => void | Promise<void>
 }
 
-interface ProbeConfig {
-  title: string
-  sql: string
-  hostId: string
-  existing: Set<string>
-  onRegister: (names: string[]) => void
-}
 
 export default function App(): JSX.Element {
   const [hosts, setHosts] = useState<HostConfig[]>([])
@@ -106,7 +98,9 @@ export default function App(): JSX.Element {
   const [library, setLibrary] = useState<SavedLibrary>(EMPTY_LIBRARY)
   const [saveDialogOpen, setSaveDialogOpen] = useState(false)
   const [promptState, setPromptState] = useState<PromptConfig | null>(null)
-  const [probeState, setProbeState] = useState<ProbeConfig | null>(null)
+  // Browser 탭: host별 서버 조회 결과 캐시(세션 한정, 디스크 미영속). 섹션 전환·재펼침 시 서버 0.
+  const [browseCache, setBrowseCache] = useState<Record<string, BrowseData>>({})
+  const [browserHostId, setBrowserHostId] = useState<string | null>(null)
   const [confirmState, setConfirmState] = useState<ConfirmConfig | null>(null)
   const [toast, setToast] = useState<string | null>(null)
   const askConfirm = (cfg: ConfirmConfig): void => setConfirmState(cfg)
@@ -768,6 +762,8 @@ export default function App(): JSX.Element {
 
   // ----- 메타데이터 관리(섹션) -----
   const metaPanelHostId = metaHostId ?? activeHostId
+  // Browser 탭 host(자체 선택, 기본 편집기 연결). host 변경이 자동 조회를 유발하지 않음(명시 버튼만).
+  const browserPanelHostId = browserHostId ?? activeHostId
   const applyMeta = (hostId: string, p: Promise<HostMetadata>): void => {
     void p.then((m) => setMetadata((cur) => ({ ...cur, [hostId]: m })))
   }
@@ -803,59 +799,19 @@ export default function App(): JSX.Element {
     })
   }
 
-  // ----- 메타데이터 조회(서버 SHOW, 명시 옵트인) → 다중 선택 등록 -----
-  const lowerSet = (names: string[]): Set<string> => new Set(names.map((n) => n.toLowerCase()))
-  // 선택 이름들을 순차 upsert(manual)하고 마지막 스냅샷 반영 + 토스트
-  const registerMeta = (
-    h: string,
-    names: string[],
-    mk: (name: string) => Parameters<typeof api.upsertMetadata>[0],
-    label: string
-  ): void => {
+  // ----- Browser 탭: 서버 테이블 등록(테이블 단위/일괄) → manual upsert + Metadata 동기 -----
+  const registerTables = (hostId: string, catalog: string, schema: string, tables: string[]): void => {
+    if (!tables.length) return
     void (async () => {
       let last: HostMetadata | undefined
-      for (const name of names) last = await api.upsertMetadata(mk(name))
-      if (last) setMetadata((cur) => ({ ...cur, [h]: last! }))
-      setToast(`${label}에 ${names.length}개 등록`)
-      setProbeState(null)
+      for (const table of tables) last = await api.upsertMetadata({ hostId, catalog, schema, table })
+      if (last) setMetadata((cur) => ({ ...cur, [hostId]: last! }))
+      setToast(
+        tables.length === 1
+          ? `'${tables[0]}' 등록 완료`
+          : `테이블 ${tables.length}개 등록 완료`
+      )
     })()
-  }
-  const probeCatalogs = (): void => {
-    const h = metaPanelHostId
-    if (!h) return
-    setProbeState({
-      title: '카탈로그 조회',
-      sql: showCatalogsSql(),
-      hostId: h,
-      existing: lowerSet(Object.keys(metadata[h]?.catalogs ?? {})),
-      onRegister: (names) => registerMeta(h, names, (catalog) => ({ hostId: h, catalog }), '카탈로그')
-    })
-  }
-  const probeSchemas = (catalog: string): void => {
-    const h = metaPanelHostId
-    if (!h) return
-    setProbeState({
-      title: `스키마 조회 · ${catalog}`,
-      sql: showSchemasSql(catalog),
-      hostId: h,
-      existing: lowerSet(Object.keys(metadata[h]?.catalogs[catalog]?.schemas ?? {})),
-      onRegister: (names) =>
-        registerMeta(h, names, (schema) => ({ hostId: h, catalog, schema }), catalog)
-    })
-  }
-  const probeTables = (catalog: string, schema: string): void => {
-    const h = metaPanelHostId
-    if (!h) return
-    setProbeState({
-      title: `테이블 조회 · ${catalog}.${schema}`,
-      sql: showTablesSql(catalog, schema),
-      hostId: h,
-      existing: lowerSet(
-        Object.keys(metadata[h]?.catalogs[catalog]?.schemas[schema]?.tables ?? {})
-      ),
-      onRegister: (names) =>
-        registerMeta(h, names, (table) => ({ hostId: h, catalog, schema, table }), `${catalog}.${schema}`)
-    })
   }
   const openColumnEdit = (
     catalog: string,
@@ -1053,14 +1009,6 @@ export default function App(): JSX.Element {
             </button>
             <button
               className="icon-btn"
-              title="카탈로그 조회 (서버 SHOW 1회)"
-              disabled={!metaPanelHostId}
-              onClick={probeCatalogs}
-            >
-              <IconServerFetch size={15} />
-            </button>
-            <button
-              className="icon-btn"
               title="새로고침"
               disabled={!metaPanelHostId}
               onClick={() => metaPanelHostId && void refreshMetadata(metaPanelHostId)}
@@ -1077,6 +1025,14 @@ export default function App(): JSX.Element {
             </button>
             {collapseBtn}
           </div>
+        </div>
+      )
+    }
+    if (section === 'browser') {
+      return (
+        <div className="explorer-header">
+          <span className="explorer-title">Browser</span>
+          <div className="explorer-actions">{collapseBtn}</div>
         </div>
       )
     }
@@ -1214,11 +1170,30 @@ export default function App(): JSX.Element {
               onSelectHost={selectMetaHost}
               onAddSchema={promptAddSchema}
               onAddTable={promptAddTable}
-              onProbeSchemas={probeSchemas}
-              onProbeTables={probeTables}
               onColumnEdit={openColumnEdit}
               onRename={renameMeta}
               onDelete={deleteMeta}
+            />
+          )}
+          {section === 'browser' && (
+            <BrowserPanel
+              hosts={hosts}
+              hostId={browserPanelHostId}
+              onSelectHost={(id) => {
+                setBrowserHostId(id)
+                if (metadata[id] === undefined) void refreshMetadata(id) // 로컬 스토어 읽기(등록됨 판정용)
+              }}
+              metadata={browserPanelHostId ? metadata[browserPanelHostId] ?? null : null}
+              cache={(browserPanelHostId && browseCache[browserPanelHostId]) || emptyBrowse}
+              onCache={(fn) => {
+                const h = browserPanelHostId
+                if (!h) return
+                setBrowseCache((c) => ({ ...c, [h]: fn(c[h] ?? emptyBrowse) }))
+              }}
+              onRegisterTables={(catalog, schema, tables) =>
+                browserPanelHostId &&
+                registerTables(browserPanelHostId, catalog, schema, tables)
+              }
             />
           )}
         </aside>
@@ -1312,16 +1287,6 @@ export default function App(): JSX.Element {
             await promptState.onSubmit(value)
             setPromptState(null)
           }}
-        />
-      )}
-      {probeState && (
-        <MetaProbeDialog
-          title={probeState.title}
-          sql={probeState.sql}
-          hostId={probeState.hostId}
-          existing={probeState.existing}
-          onRegister={probeState.onRegister}
-          onClose={() => setProbeState(null)}
         />
       )}
       {columnDialog && (
