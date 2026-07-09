@@ -2151,32 +2151,34 @@ body.row-resizing * {
   font-size: 11px;
   color: var(--text-2);
 }
-.statusbar .conn-live {
+/* 연결 표시(점 + 이름) — StatusBar·프리뷰 헤더 공용 언어 */
+.conn-live {
   display: inline-flex;
   align-items: center;
   gap: 7px;
   color: var(--text-1);
 }
-.statusbar .live-dot {
+.live-dot {
   width: 7px;
   height: 7px;
   border-radius: 50%;
   background: var(--text-2);
+  flex: none;
 }
-.statusbar .live-dot.on {
+.live-dot.on {
   background: var(--ok);
   box-shadow: 0 0 0 3px rgba(70, 201, 139, 0.18);
 }
-.statusbar .live-dot.busy {
+.live-dot.busy {
   background: var(--amber);
   box-shadow: 0 0 0 3px rgba(227, 168, 87, 0.18);
   animation: pulse 1s ease-in-out infinite;
 }
-.statusbar .live-dot.err {
+.live-dot.err {
   background: var(--danger);
   box-shadow: 0 0 0 3px rgba(255, 107, 107, 0.18);
 }
-.statusbar .live-dot.idle {
+.live-dot.idle {
   background: var(--text-2);
 }
 .statusbar .ctx-badge {
@@ -2323,26 +2325,44 @@ body.row-resizing * {
   min-height: 0;
 }
 .preview-toolbar {
-  gap: 8px;
+  gap: 10px;
 }
-.preview-target {
+/* 연결(점+이름+env) — 축소 안 함. 이름은 StatusBar와 동일하게 mono */
+.preview-conn {
+  flex: none;
+  font-size: 12px;
+  font-family: var(--mono);
+}
+/* 테이블 경로 — catalog.schema.(흐림·먼저 생략) + table(강조·유지) */
+.preview-path {
+  display: inline-flex;
+  align-items: baseline;
+  min-width: 44px;
+  overflow: hidden;
+  flex: 0 1 auto;
   font-family: var(--mono);
   font-size: 12px;
-  color: var(--text-1);
+  color: var(--text-0);
+  white-space: nowrap;
+}
+.preview-path .path-dim {
+  flex: 0 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-  flex: none;
+  color: var(--text-2);
+}
+.preview-path .path-table {
+  flex: 0 0 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 /* 0필터 발견성 힌트(툴바 안 = 세로 공간 0, 필터 생기면 사라짐) */
 .preview-filterhint {
+  flex: none;
   font-size: 11px;
   color: var(--text-2);
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
 }
 .preview-limit {
   display: inline-flex;
@@ -2384,8 +2404,8 @@ body.row-resizing * {
 .filter-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 3px 6px;
+  gap: 8px;
+  padding: 5px 8px;
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
 }
@@ -2402,23 +2422,28 @@ body.row-resizing * {
 .filter-row.st-off .filter-val {
   opacity: 0.5;
 }
+/* 전역 select/input padding(6px)이 height:24px를 잠식해 텍스트가 세로로 잘렸음 → 높이↑·세로 padding↓ */
 .filter-row select,
 .filter-row .filter-val {
   font-size: 12px;
-  height: 24px;
+  height: 30px;
+  padding-top: 4px;
+  padding-bottom: 4px;
 }
 .filter-on {
   flex: none;
   margin: 0;
+  width: 15px;
+  height: 15px;
 }
 .filter-col {
-  flex: 0 1 130px;
-  min-width: 68px;
+  flex: 0 1 200px;
+  min-width: 132px;
   font-family: var(--mono);
 }
 .filter-op {
-  flex: 0 1 108px;
-  min-width: 68px;
+  flex: 0 1 140px;
+  min-width: 108px;
 }
 .filter-val {
   flex: 1 1 auto;

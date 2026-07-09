@@ -1,5 +1,7 @@
 import { type KeyboardEvent } from 'react'
+import type { HostEnv } from '@shared/types'
 import { EditorTabs, type TabView } from './EditorTabs'
+import { EnvBadge } from './EnvBadge'
 import { FilterBar } from './FilterBar'
 import { buildPreviewSql, LIMIT_PRESETS, type PreviewFilter } from '../lib/previewQuery'
 import type { PreviewSpec } from '../lib/tabs'
@@ -23,8 +25,9 @@ interface Props {
   /** 필터 컬럼 후보(첫 결과의 columns) */
   columns: { name: string; type: string }[]
   running: boolean
-  /** 상단 칩: "연결 · catalog.schema.table" */
-  hostLabel: string
+  /** 상단 연결 표시(StatusBar와 동일 언어: 점 + 이름 + env 배지) */
+  hostName: string
+  hostEnv?: HostEnv
   onChangeFilters: (filters: PreviewFilter[]) => void
   onChangeLimit: (limit: number) => void
   onRun: () => void
@@ -52,7 +55,8 @@ export function PreviewPane({
   lastRunSql,
   columns,
   running,
-  hostLabel,
+  hostName,
+  hostEnv,
   onChangeFilters,
   onChangeLimit,
   onRun,
@@ -87,8 +91,19 @@ export function PreviewPane({
       />
 
       <div className="toolbar preview-toolbar">
-        <span className="preview-target" title={hostLabel}>
-          {hostLabel}
+        <span className="preview-conn conn-live">
+          <span className={'live-dot ' + (running ? 'busy' : 'on')} />
+          {hostName}
+          <EnvBadge env={hostEnv} />
+        </span>
+        <span
+          className="preview-path"
+          title={`${preview.catalog}.${preview.schema}.${preview.table}`}
+        >
+          <span className="path-dim">
+            {preview.catalog}.{preview.schema}.
+          </span>
+          <span className="path-table">{preview.table}</span>
         </span>
         {!hasFilters && (
           <span className="preview-filterhint">컬럼 헤더 우클릭 → 필터 추가</span>

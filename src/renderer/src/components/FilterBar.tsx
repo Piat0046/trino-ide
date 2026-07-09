@@ -88,6 +88,7 @@ export function FilterBar({
               value={f.column}
               disabled={disabled}
               aria-label="컬럼"
+              title={f.column}
               onChange={(e) => update(i, { column: e.target.value, colType: colType(e.target.value) })}
             >
               {!columns.some((c) => c.name === f.column) && f.column && (
@@ -104,6 +105,7 @@ export function FilterBar({
               value={f.op}
               disabled={disabled}
               aria-label="조건"
+              title={FILTER_OPS.find((o) => o.op === f.op)?.label}
               onChange={(e) => update(i, { op: e.target.value as FilterOp })}
             >
               {FILTER_OPS.map((o) => (

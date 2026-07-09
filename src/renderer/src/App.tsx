@@ -1198,10 +1198,8 @@ export default function App(): JSX.Element {
             lastRunSql={pa.sql}
             columns={pa.result?.columns ?? []}
             running={pa.running}
-            hostLabel={
-              (hosts.find((h) => h.id === pa.hostId)?.name ?? '연결 없음') +
-              ` · ${pa.preview.catalog}.${pa.preview.schema}.${pa.preview.table}`
-            }
+            hostName={hosts.find((h) => h.id === pa.hostId)?.name ?? '연결 없음'}
+            hostEnv={hosts.find((h) => h.id === pa.hostId)?.env}
             onChangeFilters={(filters) =>
               updateTab(pa.id, { preview: { ...pa.preview!, filters } })
             }
