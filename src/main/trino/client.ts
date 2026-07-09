@@ -139,6 +139,8 @@ export async function runQuery(
   let columns: QueryResultPayload['columns'] = []
   const rows: unknown[][] = []
   let truncated = false
+  // 실제로 '중지'로 루프를 끊었을 때만 true — 완주 후 늦게 온 취소 클릭을 부분결과로 오표기하지 않는다
+  let cancelledEarly = false
   let lastStats: QueryResult['stats']
   let warnings: string[] = []
   let infoUri: string | undefined
@@ -147,7 +149,10 @@ export async function runQuery(
     if (page.id) token.trinoQueryId = page.id
     if (page.infoUri && !infoUri) infoUri = page.infoUri
     if (page.warnings && page.warnings.length) warnings = page.warnings // 누적본(최신 페이지)
-    if (token.cancelled) break
+    if (token.cancelled) {
+      cancelledEarly = true
+      break
+    }
     if (page.error) throw new TrinoQueryError(page.error)
 
     if (page.columns && columns.length === 0) {
@@ -189,6 +194,7 @@ export async function runQuery(
     rows,
     rowCount: rows.length,
     truncated,
+    cancelled: cancelledEarly,
     stats: finalStats,
     executedSql: sql,
     warnings: warnings.length ? warnings : undefined,
