@@ -37,6 +37,18 @@ export const FILTER_OPS: { op: FilterOp; label: string }[] = [
 
 export const LIMIT_PRESETS = [100, 500, 1000, 5000, 10000]
 export const DEFAULT_LIMIT = 500
+/** OFFSET 절대행 상한 — 초과 페이지는 재스캔 부하가 커 "다음"을 막는다(WHERE로 좁히도록 유도) */
+export const PREVIEW_OFFSET_CAP = 10000
+
+export interface OrderBy {
+  column: string
+  dir: 'asc' | 'desc'
+}
+/** ORDER BY 가능한 스칼라 타입만(ROW/MAP/ARRAY/JSON 등은 Trino ORDER BY 에러) */
+export function isOrderable(colType: string): boolean {
+  const t = (colType ?? '').toLowerCase()
+  return NUMERIC_RE.test(t) || STRING_RE.test(t) || /^(date|timestamp|time|boolean)/.test(t)
+}
 
 const NUMERIC_RE = /^(tinyint|smallint|integer|int|bigint|real|double|decimal|numeric|float)/i
 const STRING_RE = /^(varchar|char)/i
@@ -91,8 +103,22 @@ export function buildPredicate(f: PreviewFilter): string | null {
   }
 }
 
-/** SELECT * FROM "cat"."sch"."tbl" [WHERE …(AND)] LIMIT n */
-export function buildPreviewSql(ref: PreviewRef, filters: PreviewFilter[], limit: number): string {
+/**
+ * SELECT * FROM "cat"."sch"."tbl" [WHERE …(AND)] ORDER BY … LIMIT n [OFFSET m]
+ * - orderBy 지정: `"col" dir` + 나머지 정렬가능 컬럼 asc tiebreaker(총순서 → OFFSET 페이지 경계 정확).
+ * - orderBy null(기본): 정렬가능 컬럼을 ordinal로 총순서(`ORDER BY 1, 2, …`) — columns를 알면 tiebreaker
+ *   포함해 경계 정확. columns 미상(첫 조회)이면 `ORDER BY 1`(첫 컬럼)로 폴백(그 첫 렌더 이후 페이지 이동은
+ *   result.columns가 있어 총순서가 적용됨).
+ * page>0이면 OFFSET page*n.
+ */
+export function buildPreviewSql(
+  ref: PreviewRef,
+  filters: PreviewFilter[],
+  limit: number,
+  page = 0,
+  orderBy: OrderBy | null = null,
+  columns: { name: string; type: string }[] = []
+): string {
   const table =
     quoteIdent(ref.catalog) + '.' + quoteIdent(ref.schema) + '.' + quoteIdent(ref.table)
   const preds = filters
@@ -100,6 +126,22 @@ export function buildPreviewSql(ref: PreviewRef, filters: PreviewFilter[], limit
     .map(buildPredicate)
     .filter((p): p is string => p !== null)
   const where = preds.length ? ' WHERE ' + preds.join(' AND ') : ''
+
+  let orderClause: string
+  if (orderBy) {
+    const parts = [quoteIdent(orderBy.column) + (orderBy.dir === 'desc' ? ' DESC' : ' ASC')]
+    for (const c of columns) {
+      if (c.name !== orderBy.column && isOrderable(c.type)) parts.push(quoteIdent(c.name) + ' ASC')
+    }
+    orderClause = ' ORDER BY ' + parts.join(', ')
+  } else {
+    // 기본: 정렬가능 컬럼 ordinal 총순서. 컬럼 미상(첫 조회)이면 ORDER BY 1
+    const ords = columns.map((c, i) => (isOrderable(c.type) ? i + 1 : 0)).filter((o) => o > 0)
+    orderClause = ords.length ? ' ORDER BY ' + ords.join(', ') : ' ORDER BY 1'
+  }
+
   const n = Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : DEFAULT_LIMIT
-  return `SELECT * FROM ${table}${where} LIMIT ${n}`
+  const p = Number.isFinite(page) && page > 0 ? Math.floor(page) : 0
+  const offset = p > 0 ? ` OFFSET ${p * n}` : ''
+  return `SELECT * FROM ${table}${where}${orderClause} LIMIT ${n}${offset}`
 }

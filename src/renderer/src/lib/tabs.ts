@@ -1,5 +1,5 @@
 import type { QueryErrorInfo, QueryResultPayload, QueryStatsSummary } from '@shared/types'
-import { buildPreviewSql, DEFAULT_LIMIT, type PreviewFilter } from './previewQuery'
+import { buildPreviewSql, DEFAULT_LIMIT, type OrderBy, type PreviewFilter } from './previewQuery'
 
 /** 테이블 프리뷰 탭 상태(#54). filters/limit는 편집 대상, tab.sql=마지막 실행 SQL. */
 export interface PreviewSpec {
@@ -10,6 +10,10 @@ export interface PreviewSpec {
   limit: number
   /** 마지막 조회 시 실제 적용된(enabled+유효) 필터 스냅샷 — 행별 적용됨/대기 판정용 */
   appliedFilters?: PreviewFilter[]
+  /** 현재 페이지(0-base). Prev/Next로만 변경, 필터/정렬/LIMIT 적용 시 0 리셋 */
+  page: number
+  /** 서버 정렬(ORDER BY). null이면 기본 첫 컬럼(ORDER BY 1) */
+  orderBy: OrderBy | null
 }
 
 /** 에디터 탭 1개 = 독립 SQL 문서. 저장 쿼리 바인딩(savedQueryId!=null) 또는 스크래치. */
@@ -98,8 +102,8 @@ export function makePreview(
   ref: { catalog: string; schema: string; table: string },
   hostId: string | null
 ): EditorTab {
-  const preview: PreviewSpec = { ...ref, filters: [], limit: DEFAULT_LIMIT }
-  const sql = buildPreviewSql(ref, preview.filters, preview.limit)
+  const preview: PreviewSpec = { ...ref, filters: [], limit: DEFAULT_LIMIT, page: 0, orderBy: null }
+  const sql = buildPreviewSql(ref, preview.filters, preview.limit, preview.page, preview.orderBy)
   return {
     id: crypto.randomUUID(),
     savedQueryId: null,

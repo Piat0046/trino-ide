@@ -48,7 +48,21 @@ import {
 } from './lib/tabs'
 import { PreviewPane } from './components/PreviewPane'
 import { RegisterTableDialog } from './components/RegisterTableDialog'
-import { buildPreviewSql, buildPredicate, type PreviewFilter } from './lib/previewQuery'
+import {
+  buildPreviewSql,
+  buildPredicate,
+  isOrderable,
+  PREVIEW_OFFSET_CAP,
+  type OrderBy,
+  type PreviewFilter
+} from './lib/previewQuery'
+
+/** 프리뷰 실행 성공 시에만 커밋할 스냅샷(거짓 이동/적용 방지) */
+interface PreviewCommit {
+  appliedFilters: PreviewFilter[]
+  page: number
+  orderBy: OrderBy | null
+}
 import { hydrateSession, serializeSession } from './lib/session'
 
 const api = window.api
@@ -474,7 +488,7 @@ export default function App(): JSX.Element {
     sqlText: string,
     hostId: string,
     recordHistory = true,
-    previewApplied: PreviewFilter[] | null = null
+    previewCommit: PreviewCommit | null = null
   ): Promise<void> => {
     const id = crypto.randomUUID()
     updateTab(tabId, { running: true, requestId: id, error: null, errorInfo: null, progress: null })
@@ -482,8 +496,9 @@ export default function App(): JSX.Element {
       const res = await api.runQuery({ hostId, sql: sqlText, requestId: id, recordHistory })
       if (res.ok) {
         updateTab(tabId, { result: res.value, error: null, errorInfo: null })
-        // 프리뷰: 실제 실행 성공 시에만 run SQL + 적용 스냅샷 커밋 → prod 확인취소·에러 시 거짓 "적용됨" 방지
-        if (previewApplied !== null) {
+        // 프리뷰: 실제 실행 성공 시에만 run SQL + 필터/페이지/정렬 스냅샷 커밋
+        // → prod 확인취소·에러 시 거짓 "적용됨"·거짓 페이지 이동 방지
+        if (previewCommit !== null) {
           setPanes((prev) =>
             prev.map((p) => ({
               ...p,
@@ -493,7 +508,12 @@ export default function App(): JSX.Element {
                       ...t,
                       sql: sqlText,
                       baseSql: sqlText,
-                      preview: { ...t.preview, appliedFilters: previewApplied }
+                      preview: {
+                        ...t.preview,
+                        appliedFilters: previewCommit.appliedFilters,
+                        page: previewCommit.page,
+                        orderBy: previewCommit.orderBy
+                      }
                     }
                   : t
               )
@@ -515,10 +535,10 @@ export default function App(): JSX.Element {
     sqlText: string,
     hostId: string,
     recordHistory = true,
-    previewApplied: PreviewFilter[] | null = null
+    previewCommit: PreviewCommit | null = null
   ): void => {
     const doExecute = (): void => {
-      void executeQuery(tabId, sqlText, hostId, recordHistory, previewApplied)
+      void executeQuery(tabId, sqlText, hostId, recordHistory, previewCommit)
     }
     // prod로 지정 + 옵트인한 연결이면 실행 전 확인(로컬 host.env 조회만 — 서버 호출 없음)
     const host = hosts.find((h) => h.id === hostId)
@@ -569,6 +589,24 @@ export default function App(): JSX.Element {
   }
 
   // ----- 테이블 프리뷰(#54): recordHistory:false로 history·학습·그리드 무오염 -----
+  const previewTab = (paneId: string): EditorTab | undefined => {
+    const t = paneOf(paneId) && activeTabOf(paneOf(paneId)!)
+    return t && t.preview ? t : undefined
+  }
+  // 재조회 헬퍼: 주어진 filters/limit/page/orderBy로 SQL 조립 + 실행 성공 시 커밋(거짓 이동 방지)
+  const rerunPreview = (
+    t: EditorTab,
+    filters: PreviewFilter[],
+    limit: number,
+    page: number,
+    orderBy: OrderBy | null
+  ): void => {
+    if (!t.preview || !t.hostId) return void (!t.hostId && setToast('연결을 먼저 선택하세요.'))
+    const applied = filters.filter((f) => f.enabled !== false && buildPredicate(f) !== null)
+    const cols = t.result?.columns ?? []
+    const sql = buildPreviewSql(t.preview, applied, limit, page, orderBy, cols)
+    runFresh(t.id, sql, t.hostId, false, { appliedFilters: applied, page, orderBy })
+  }
   const openTablePreview = (catalog: string, schema: string, table: string): void => {
     const h = browserPanelHostId
     if (!h) return void setToast('연결을 먼저 선택하세요.')
@@ -590,30 +628,52 @@ export default function App(): JSX.Element {
     }
     const tab = openOrReplaceInFocused(() => makePreview({ catalog, schema, table }, h))
     updateTab(tab.id, { title: table }) // disposable 교체 시 제목 유지되는 걸 테이블명으로 강제
-    runFresh(tab.id, tab.sql, h, false, []) // 초기 프리뷰: 필터 없음(성공 시 appliedFilters:[] 커밋)
+    rerunPreview(tab, [], tab.preview!.limit, 0, null) // 초기: 필터 없음·page 0·기본 정렬(ORDER BY 1)
   }
+  // 조회(⌘↵/Enter/대기칩): 라이브 필터 적용 + 현재 limit/orderBy, page 0
   const runPreview = (paneId: string): void => {
-    const t = paneOf(paneId) && activeTabOf(paneOf(paneId)!)
-    if (!t?.preview || t.running) return
-    if (!t.hostId) return void setToast('연결을 먼저 선택하세요.')
-    const sql = buildPreviewSql(t.preview, t.preview.filters, t.preview.limit)
-    // 이번 조회에 실제 적용된(enabled+유효) 필터 스냅샷 — 실행 성공 시에만 커밋(거짓 적용됨 방지)
-    const appliedFilters = t.preview.filters.filter(
-      (f) => f.enabled !== false && buildPredicate(f) !== null
-    )
-    runFresh(t.id, sql, t.hostId, false, appliedFilters)
+    const t = previewTab(paneId)
+    if (!t || t.running) return
+    rerunPreview(t, t.preview!.filters, t.preview!.limit, 0, t.preview!.orderBy)
+  }
+  // LIMIT 변경 = 페이지 크기 변경 → 즉시 재조회(page 0), 적용 스냅샷 기준
+  const changePreviewLimit = (paneId: string, limit: number): void => {
+    const t = previewTab(paneId)
+    if (!t) return
+    updateTab(t.id, { preview: { ...t.preview!, limit } })
+    if (!t.running) rerunPreview(t, t.preview!.appliedFilters ?? [], limit, 0, t.preview!.orderBy)
+  }
+  // 정렬(헤더 클릭) → 서버 ORDER BY 승격, page 0, 적용 스냅샷 기준
+  const setPreviewSort = (paneId: string, column: string, dir: 'asc' | 'desc'): void => {
+    const t = previewTab(paneId)
+    if (!t || t.running) return
+    rerunPreview(t, t.preview!.appliedFilters ?? [], t.preview!.limit, 0, { column, dir })
+  }
+  // 페이지 이동 = 적용 스냅샷 + orderBy + 새 page(라이브 미적용 필터는 안 끌어옴)
+  const goToPreviewPage = (paneId: string, delta: number): void => {
+    const t = previewTab(paneId)
+    if (!t || t.running) return
+    const page = Math.max(0, t.preview!.page + delta)
+    rerunPreview(t, t.preview!.appliedFilters ?? [], t.preview!.limit, page, t.preview!.orderBy)
   }
   const clearPreviewFilters = (paneId: string): void => {
-    const t = paneOf(paneId) && activeTabOf(paneOf(paneId)!)
-    if (!t?.preview || t.running || !t.hostId) return
-    updateTab(t.id, { preview: { ...t.preview, filters: [] } }) // 필터 목록만 즉시 비움(로컬)
-    const sql = buildPreviewSql(t.preview, [], t.preview.limit) // filters=[] → WHERE 없음
-    runFresh(t.id, sql, t.hostId, false, []) // sql·appliedFilters 커밋은 실행 성공 시
+    const t = previewTab(paneId)
+    if (!t || t.running || !t.hostId) return
+    updateTab(t.id, { preview: { ...t.preview!, filters: [] } }) // 필터 목록만 즉시 비움(로컬)
+    rerunPreview(t, [], t.preview!.limit, 0, t.preview!.orderBy)
   }
   const openPreviewInEditor = (paneId: string): void => {
-    const t = paneOf(paneId) && activeTabOf(paneOf(paneId)!)
-    if (!t?.preview) return
-    const sql = buildPreviewSql(t.preview, t.preview.filters, t.preview.limit)
+    const t = previewTab(paneId)
+    if (!t) return
+    const cols = t.result?.columns ?? []
+    const sql = buildPreviewSql(
+      t.preview!,
+      t.preview!.filters,
+      t.preview!.limit,
+      t.preview!.page,
+      t.preview!.orderBy,
+      cols
+    )
     addTabToPane(paneId, makeScratch(sql, t.hostId, nextUntitled(allTitles())))
   }
   // 그리드 우클릭 "필터 추가"/"이 값으로 필터" → 프리뷰 필터 행 추가(값 프리필, 자동 실행 안 함)
@@ -1162,6 +1222,34 @@ export default function App(): JSX.Element {
     const split = panes.length > 1
     // 프리뷰 탭은 상단(필터) 내용 높이 + 결과가 나머지 가득(고정 분할·v-splitter 없음)
     const isPreview = !!pa?.preview
+    // 프리뷰 페이저: 총 개수 조회 없음 → 이번 페이지가 정확히 pageSize행이고 OFFSET 상한 이내면 "다음" 가능
+    const pv = pa?.preview ?? null
+    const pvCols = pa?.result?.columns ?? []
+    const pvPageSize = pv?.limit ?? 0
+    const pvRowCount = pa?.result?.rowCount ?? 0
+    const pvPage = pv?.page ?? 0
+    const pvSortIdx = pv?.orderBy ? Math.max(0, pvCols.findIndex((c) => c.name === pv.orderBy!.column)) : 0
+    const pager =
+      isPreview && pa?.result
+        ? {
+            page: pvPage,
+            rangeFrom: pvRowCount ? pvPage * pvPageSize + 1 : 0,
+            rangeTo: pvPage * pvPageSize + pvRowCount,
+            canPrev: pvPage > 0 && !pa.running,
+            canNext:
+              !pa.running &&
+              pvRowCount === pvPageSize &&
+              !pa.result.truncated &&
+              (pvPage + 1) * pvPageSize <= PREVIEW_OFFSET_CAP,
+            // 다음 행은 더 있지만 OFFSET 상한이라 막힘 → WHERE로 좁히도록 안내
+            atCap:
+              pvRowCount === pvPageSize &&
+              !pa.result.truncated &&
+              (pvPage + 1) * pvPageSize > PREVIEW_OFFSET_CAP,
+            sortLabel: pv?.orderBy?.column ?? pvCols[0]?.name ?? '',
+            sortDir: (pv?.orderBy?.dir ?? 'asc') as 'asc' | 'desc'
+          }
+        : undefined
     return (
       <div
         key={pane.id}
@@ -1203,7 +1291,7 @@ export default function App(): JSX.Element {
             onChangeFilters={(filters) =>
               updateTab(pa.id, { preview: { ...pa.preview!, filters } })
             }
-            onChangeLimit={(limit) => updateTab(pa.id, { preview: { ...pa.preview!, limit } })}
+            onChangeLimit={(limit) => changePreviewLimit(pane.id, limit)}
             onRun={() => runPreview(pane.id)}
             onCancel={() => cancelInPane(pane.id)}
             onClear={() => clearPreviewFilters(pane.id)}
@@ -1261,6 +1349,22 @@ export default function App(): JSX.Element {
           onCancel={() => cancelInPane(pane.id)}
           onAddFilter={
             pa?.preview ? (origIndex, value) => addPreviewFilter(pane.id, origIndex, value) : undefined
+          }
+          pager={pager}
+          onPrevPage={() => goToPreviewPage(pane.id, -1)}
+          onNextPage={() => goToPreviewPage(pane.id, 1)}
+          previewSort={isPreview ? { origIndex: pvSortIdx, dir: pv?.orderBy?.dir ?? 'asc' } : undefined}
+          rowIndexOffset={isPreview ? pvPage * pvPageSize : 0}
+          onServerSort={
+            isPreview
+              ? (origIndex, dir) => {
+                  const col = pvCols[origIndex]
+                  if (!col) return
+                  if (!isOrderable(col.type))
+                    return void setToast(`'${col.name}'(${col.type})은 정렬할 수 없어요.`)
+                  setPreviewSort(pane.id, col.name, dir)
+                }
+              : undefined
           }
           onSelectRecord={(snap) =>
             setRecordByPane((m) =>

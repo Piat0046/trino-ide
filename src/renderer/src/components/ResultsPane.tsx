@@ -41,6 +41,25 @@ interface Props {
   onSelectRecord?: (snap: RecordSnapshot | null) => void
   /** 프리뷰 탭(#54)에서만 전달 — 컬럼 헤더/셀 우클릭 "필터 추가". 없으면 메뉴 항목 숨김. */
   onAddFilter?: (origIndex: number, value?: unknown) => void
+  /** 프리뷰 페이저(있으면 .transport에 ◀ 페이지 N ▶ 표시). 서버 왕복 per 페이지. */
+  pager?: {
+    page: number
+    rangeFrom: number
+    rangeTo: number
+    canPrev: boolean
+    canNext: boolean
+    atCap: boolean
+    sortLabel: string
+    sortDir: 'asc' | 'desc'
+  }
+  onPrevPage?: () => void
+  onNextPage?: () => void
+  /** 프리뷰 서버 정렬 상태(헤더 화살표·aria-sort 구동). */
+  previewSort?: { origIndex: number; dir: 'asc' | 'desc' }
+  /** 있으면 프리뷰 서버정렬 모드: 헤더 클릭이 서버 ORDER BY로 승격되고 클라 정렬은 비활성. */
+  onServerSort?: (origIndex: number, dir: 'asc' | 'desc') => void
+  /** 행번호 gutter 시작 오프셋(프리뷰 페이지: page*pageSize → 501.. 식 절대 번호) */
+  rowIndexOffset?: number
 }
 
 const HEAD_H = 42
@@ -126,9 +145,17 @@ export function ResultsPane({
   progress,
   onCancel,
   onSelectRecord,
-  onAddFilter
+  onAddFilter,
+  pager,
+  onPrevPage,
+  onNextPage,
+  previewSort,
+  onServerSort,
+  rowIndexOffset = 0
 }: Props): JSX.Element {
   const [tab, setTab] = useState<'results' | 'messages'>('results')
+  // 프리뷰 서버정렬 모드: 헤더 클릭=서버 ORDER BY, 클라 정렬 비활성(서버가 이미 정렬)
+  const previewMode = !!onServerSort
   const parentRef = useRef<HTMLDivElement>(null)
 
   // 실행 중 라이브 경과 타이머(월클럭). 실행이 시작되면 0부터 카운트업.
@@ -293,6 +320,7 @@ export function ResultsPane({
 
   // ----- 클라이언트 정렬(현재 페이지 한정, 타입 인지) -----
   const displayRows = useMemo(() => {
+    if (previewMode) return rows // 프리뷰: 서버가 이미 ORDER BY로 정렬 → 클라 재정렬 안 함(이중 정렬 방지)
     if (!sort) return rows
     const { origIndex, dir } = sort
     const numeric = typeClass(columns[origIndex]?.type ?? '') === 't-num'
@@ -315,7 +343,7 @@ export function ResultsPane({
         return c * sign
       })
       .map(([r]) => r)
-  }, [rows, sort, columns])
+  }, [rows, sort, columns, previewMode])
 
   const toggleSort = (origIndex: number): void => {
     setSel(null)
@@ -324,6 +352,16 @@ export function ResultsPane({
       if (s.dir === 'asc') return { origIndex, dir: 'desc' }
       return null // desc → 정렬 해제(원본 순서)
     })
+  }
+  // 헤더 클릭: 프리뷰=서버 ORDER BY 승격(asc↔desc), 일반=클라 토글
+  const handleHeaderSort = (origIndex: number): void => {
+    if (previewMode) {
+      const nextDir =
+        previewSort && previewSort.origIndex === origIndex && previewSort.dir === 'asc'
+          ? 'desc'
+          : 'asc'
+      onServerSort!(origIndex, nextDir)
+    } else toggleSort(origIndex)
   }
 
   // ----- 리사이즈 -----
@@ -460,7 +498,7 @@ export function ResultsPane({
 
   const template = `${ROWNUM_W}px ${visibleCols.map((c) => `${c.width}px`).join(' ')}`
   const totalWidth = ROWNUM_W + visibleCols.reduce((a, c) => a + c.width, 0)
-  const baseIndex = 0 // 전체 결과가 메모리에 있으므로 행번호는 항상 1..N
+  const baseIndex = rowIndexOffset // 일반 쿼리=0(1..N), 프리뷰=page*pageSize(501.. 절대 번호)
   const stats = result?.stats
   const cancelled = result?.cancelled ?? false
   // 중지되었거나 FINISHED가 아니면 통계가 미확정(잠정) — 배너 + 값 흐리게로 신호.
@@ -865,7 +903,13 @@ export function ResultsPane({
                   <div className="g-hcell rownum">#</div>
                   {visibleCols.map((c) => {
                     const col = columns[c.origIndex]
-                    const sorted = sort?.origIndex === c.origIndex ? sort.dir : null
+                    const sorted = previewMode
+                      ? previewSort?.origIndex === c.origIndex
+                        ? previewSort.dir
+                        : null
+                      : sort?.origIndex === c.origIndex
+                        ? sort.dir
+                        : null
                     return (
                       <div
                         className={
@@ -877,9 +921,15 @@ export function ResultsPane({
                         }
                         key={c.origIndex}
                         data-col={c.origIndex}
-                        title={`${col.name} · ${col.type} — 클릭: 정렬 / 우클릭: 메뉴`}
+                        role="columnheader"
+                        aria-sort={sorted === 'asc' ? 'ascending' : sorted === 'desc' ? 'descending' : 'none'}
+                        title={
+                          previewMode
+                            ? `${col.name} · ${col.type} — 클릭: 이 컬럼으로 서버 정렬 (페이지 1부터) · 서버 조회 1회 / 우클릭: 메뉴`
+                            : `${col.name} · ${col.type} — 클릭: 정렬 / 우클릭: 메뉴`
+                        }
                         draggable
-                        onClick={() => toggleSort(c.origIndex)}
+                        onClick={() => handleHeaderSort(c.origIndex)}
                         onContextMenu={(e) => {
                           e.preventDefault()
                           setCtxMenu({
@@ -1048,6 +1098,59 @@ export function ResultsPane({
 
       {result && !running && (
         <div className="transport">
+          {pager && (
+            <span className="pager" role="group" aria-label="페이지 이동">
+              <button
+                className="pager-btn"
+                aria-label="이전 페이지"
+                disabled={!pager.canPrev}
+                title="이전 페이지 · 서버 조회 1회"
+                onClick={onPrevPage}
+              >
+                <IconChevronLeft size={13} />
+              </button>
+              <span className="pager-page" aria-live="polite">
+                페이지 {pager.page + 1}
+                {pager.rangeFrom > 0 && (
+                  <span className="pager-range">
+                    {' · '}
+                    {pager.rangeFrom.toLocaleString()}–{pager.rangeTo.toLocaleString()}행
+                  </span>
+                )}
+              </span>
+              <button
+                className="pager-btn"
+                aria-label="다음 페이지"
+                disabled={!pager.canNext}
+                title={
+                  pager.canNext
+                    ? '다음 페이지 · 서버 조회 1회'
+                    : pager.atCap
+                      ? '더 깊은 페이지는 막혀 있어요 — WHERE로 좁히거나 SQL 편집기로 여세요'
+                      : '마지막 페이지예요'
+                }
+                onClick={onNextPage}
+              >
+                <IconChevronRight size={13} />
+              </button>
+              <span
+                className="pager-sort"
+                title="이 순서로 페이지를 나눠요 · 헤더 클릭으로 변경"
+              >
+                정렬 {pager.sortLabel} {pager.sortDir === 'asc' ? '▲' : '▼'}
+              </span>
+              {pager.atCap && (
+                <span className="pager-cap" style={{ color: 'var(--warn)' }}>
+                  ⚠ WHERE로 좁히세요
+                </span>
+              )}
+              {!pager.canNext && !pager.atCap && pager.page > 0 && (
+                <span className="pager-end" title="마지막 페이지예요">
+                  끝
+                </span>
+              )}
+            </span>
+          )}
           <span
             className={'ft-state ' + (finished ? 'ok' : 'warn')}
             title={

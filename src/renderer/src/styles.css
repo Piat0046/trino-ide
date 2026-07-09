@@ -2126,11 +2126,59 @@ body.row-resizing * {
   font-size: 11px;
   color: var(--text-2);
   flex-shrink: 0;
+  overflow: hidden; /* 좁은 폭에서 페이저/통계가 페인 밖으로 넘치지 않게 */
 }
 .stat {
   display: inline-flex;
   align-items: center;
   gap: 5px;
+}
+/* 프리뷰 페이저(#54) — .transport 왼쪽. 좁으면 정렬 라벨부터 축소 */
+.pager {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+.pager-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 5px;
+  color: var(--text-1);
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+}
+.pager-btn:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.pager-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.pager-page {
+  color: var(--text-1);
+  white-space: nowrap;
+}
+.pager-range {
+  color: var(--text-2);
+}
+.pager-sort {
+  color: var(--text-2);
+  white-space: nowrap;
+  margin-left: 3px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 0 1 auto;
+}
+.pager-cap {
+  white-space: nowrap;
+}
+.pager-end {
+  color: var(--text-2);
+  white-space: nowrap;
 }
 .stat b {
   color: var(--text-1);

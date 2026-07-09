@@ -64,8 +64,17 @@ export function PreviewPane({
   onClear,
   onOpenInEditor
 }: Props): JSX.Element {
-  // 변경 대기: 현재 필터/LIMIT로 만든 SQL이 마지막 실행 SQL과 다르면 ●
-  const staged = buildPreviewSql(preview, preview.filters, preview.limit) !== lastRunSql
+  // 변경 대기: 현재 필터(라이브)로 만든 SQL이 마지막 실행 SQL과 다르면 ●
+  // (page/orderBy는 즉시 재조회라 lastRunSql에 반영됨 → 필터 편집만 staged로 뜬다)
+  const staged =
+    buildPreviewSql(
+      preview,
+      preview.filters,
+      preview.limit,
+      preview.page,
+      preview.orderBy,
+      columns
+    ) !== lastRunSql
   const limitInPresets = LIMIT_PRESETS.includes(preview.limit)
   const hasFilters = preview.filters.length > 0
 
@@ -119,7 +128,7 @@ export function PreviewPane({
             필터 비우기
           </button>
         )}
-        <label className="preview-limit" title="표시 행 상한 (더 보려면 늘려 조회)">
+        <label className="preview-limit" title="페이지당 행 수 · 바꾸면 페이지 1부터 다시 조회 · 서버 조회 1회">
           LIMIT
           <select
             aria-label="표시 행 상한"
