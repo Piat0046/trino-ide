@@ -20,6 +20,12 @@ import {
   IconSearch,
   IconStop
 } from './icons'
+import {
+  typeClass,
+  formatCell,
+  buildRecordSnapshot,
+  type RecordSnapshot
+} from '../lib/cellFormat'
 
 const api = window.api
 
@@ -30,6 +36,8 @@ interface Props {
   running: boolean
   progress: QueryStatsSummary | null
   onCancel: () => void
+  /** 선택 셀이 속한 행 스냅샷을 인스펙터로 emit(선택 없으면 null). 내부 선택모델은 불변. */
+  onSelectRecord?: (snap: RecordSnapshot | null) => void
 }
 
 const HEAD_H = 42
@@ -59,20 +67,6 @@ type CtxMenu = { x: number; y: number } & (
   | { kind: 'cell'; row: number; origIndex: number }
 )
 
-type TypeClass = 't-num' | 't-str' | 't-time' | 't-bool'
-function typeClass(type: string): TypeClass {
-  const t = type.toLowerCase()
-  if (/(int|bigint|smallint|tinyint|double|real|decimal|numeric|float)/.test(t)) return 't-num'
-  if (/(timestamp|date|time|interval)/.test(t)) return 't-time'
-  if (/bool/.test(t)) return 't-bool'
-  return 't-str'
-}
-/** 그리드 표시용(NULL 라벨 유지) */
-function formatCell(v: unknown): string {
-  if (v === null || v === undefined) return ''
-  if (typeof v === 'object') return JSON.stringify(v)
-  return String(v)
-}
 /** 복사/내보내기용(NULL은 빈 문자열) */
 function cellText(v: unknown): string {
   if (v === null || v === undefined) return ''
@@ -127,7 +121,8 @@ export function ResultsPane({
   errorInfo,
   running,
   progress,
-  onCancel
+  onCancel,
+  onSelectRecord
 }: Props): JSX.Element {
   const [tab, setTab] = useState<'results' | 'messages'>('results')
   const parentRef = useRef<HTMLDivElement>(null)
@@ -222,8 +217,10 @@ export function ResultsPane({
     }
   }, [ctxMenu])
 
-  const columns = result?.columns ?? []
-  const rows = result?.rows ?? []
+  // result에 memoize: result가 null일 때 매 렌더 새 [] 를 만들지 않도록(참조 안정) —
+  // 안 그러면 displayRows/emit effect가 매 렌더 발화해 무한 렌더 루프에 빠진다.
+  const columns = useMemo(() => result?.columns ?? [], [result])
+  const rows = useMemo(() => result?.rows ?? [], [result])
 
   // 새 쿼리 모양(시그니처 변경)이면 컬럼/정렬/선택 초기화
   const currentSig = result ? signatureOf(columns) : ''
@@ -418,6 +415,26 @@ export function ResultsPane({
     setSel({ row, origIndex })
     parentRef.current?.focus()
   }
+
+  // 선택(또는 정렬/새 결과로 인한 변경) 시 인스펙터로 행 스냅샷 emit-up(A2 — 내부 선택모델 불변).
+  // 콜백 identity 변화로 인한 재발화를 막기 위해 ref로 최신 콜백만 참조.
+  const emitRef = useRef(onSelectRecord)
+  emitRef.current = onSelectRecord
+  useEffect(() => {
+    const emit = emitRef.current
+    if (!emit) return
+    if (!sel || !result) {
+      emit(null)
+      return
+    }
+    const rowVals = displayRows[sel.row]
+    if (!rowVals) {
+      emit(null)
+      return
+    }
+    emit(buildRecordSnapshot(columns, rowVals, sel.origIndex, sel.row, displayRows.length))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sel, displayRows, columns, result])
   const onGridKey = (e: React.KeyboardEvent): void => {
     if ((e.metaKey || e.ctrlKey) && (e.key === 'c' || e.key === 'C') && sel) {
       e.preventDefault()
