@@ -47,6 +47,7 @@ import {
   nextUntitled
 } from './lib/tabs'
 import { PreviewPane } from './components/PreviewPane'
+import { RegisterTableDialog } from './components/RegisterTableDialog'
 import { buildPreviewSql, type PreviewFilter } from './lib/previewQuery'
 import { hydrateSession, serializeSession } from './lib/session'
 
@@ -104,6 +105,7 @@ export default function App(): JSX.Element {
   // Browser 탭: host별 서버 조회 결과 캐시(세션 한정, 디스크 미영속). 섹션 전환·재펼침 시 서버 0.
   const [browseCache, setBrowseCache] = useState<Record<string, BrowseData>>({})
   const [browserHostId, setBrowserHostId] = useState<string | null>(null)
+  const [registerTableOpen, setRegisterTableOpen] = useState(false)
   const [confirmState, setConfirmState] = useState<ConfirmConfig | null>(null)
   const [toast, setToast] = useState<string | null>(null)
   const askConfirm = (cfg: ConfirmConfig): void => setConfirmState(cfg)
@@ -1309,6 +1311,7 @@ export default function App(): JSX.Element {
                 })
               }}
               onPreviewTable={openTablePreview}
+              onManualRegister={() => setRegisterTableOpen(true)}
             />
           )}
         </aside>
@@ -1401,6 +1404,28 @@ export default function App(): JSX.Element {
           onSubmit={async (value) => {
             await promptState.onSubmit(value)
             setPromptState(null)
+          }}
+        />
+      )}
+      {registerTableOpen && browserPanelHostId && (
+        <RegisterTableDialog
+          defaultCatalog={hosts.find((h) => h.id === browserPanelHostId)?.catalog ?? ''}
+          defaultSchema={hosts.find((h) => h.id === browserPanelHostId)?.schema ?? ''}
+          registered={
+            new Set(
+              Object.entries(metadata[browserPanelHostId]?.catalogs ?? {}).flatMap(([c, cat]) =>
+                Object.entries(cat.schemas).flatMap(([s, sch]) =>
+                  Object.entries(sch.tables)
+                    .filter(([, t]) => t.source === 'manual')
+                    .map(([t]) => `${c}.${s}.${t}`.toLowerCase())
+                )
+              )
+            )
+          }
+          onClose={() => setRegisterTableOpen(false)}
+          onSubmit={(catalog, schema, table) => {
+            registerTables(browserPanelHostId, catalog, schema, [table])
+            setRegisterTableOpen(false)
           }}
         />
       )}

@@ -10,6 +10,7 @@ import {
   IconChevronDown,
   IconChevronLeft,
   IconChevronRight,
+  IconPencil,
   IconPlus,
   IconRefresh,
   IconTrash
@@ -43,6 +44,8 @@ interface Props {
   onUnregister: (catalog: string, schema: string, table: string) => void
   /** home 등록 테이블 더블클릭 → 데이터 프리뷰(#54) */
   onPreviewTable: (catalog: string, schema: string, table: string) => void
+  /** 찾아보기 없이 직접 입력해 등록(팝업) */
+  onManualRegister: () => void
 }
 
 type NodeErr = string
@@ -63,7 +66,8 @@ export function BrowserPanel({
   onCache,
   onRegisterTables,
   onUnregister,
-  onPreviewTable
+  onPreviewTable,
+  onManualRegister
 }: Props): JSX.Element {
   const [mode, setMode] = useState<Mode>('home')
   const [expanded, setExpanded] = useState<Set<string>>(new Set()) // browse 펼침
@@ -421,6 +425,9 @@ export function BrowserPanel({
           <button className="primary" onClick={() => setMode('browse')}>
             <IconPlus size={14} /> 찾아보기
           </button>
+          <button className="linklike" onClick={onManualRegister}>
+            직접 등록
+          </button>
         </div>
       </div>
     )
@@ -429,9 +436,14 @@ export function BrowserPanel({
   return (
     <div className="panel browser-panel">
       {hostSelect}
-      <button className="browse-find-btn" onClick={() => setMode('browse')}>
-        <IconPlus size={13} /> 찾아보기
-      </button>
+      <div className="browse-actions">
+        <button className="browse-find-btn" onClick={() => setMode('browse')}>
+          <IconPlus size={13} /> 찾아보기
+        </button>
+        <button className="browse-find-btn" onClick={onManualRegister} title="catalog·schema·table을 직접 입력해 등록">
+          <IconPencil size={13} /> 직접 등록
+        </button>
+      </div>
       <div className="browse-caption">등록한 항목 · 서버 조회 0</div>
       <ul className="list browse-tree home" role="tree">
         {homeTree.map(({ cName, schs }) => {

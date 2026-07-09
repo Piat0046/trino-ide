@@ -2406,16 +2406,25 @@ body.row-resizing * {
   cursor: pointer;
 }
 
-/* home(등록됨) 진입 버튼 — full-width secondary */
+/* home 진입 액션 행(찾아보기 + 직접 등록) */
+/* home 진입 액션 행(찾아보기 + 직접 등록) — 좁으면 줄바꿈 */
+.browse-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 6px 12px 0;
+}
+/* home(등록됨) 진입 버튼 — 액션 행에서 균등 분할, 좁으면 수축/줄바꿈 */
 .browse-find-btn {
+  flex: 1 1 auto;
+  min-width: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 5px;
-  width: calc(100% - 24px);
-  margin: 6px 12px 0;
   padding: 6px;
   font-size: 12px;
+  white-space: nowrap;
 }
 /* browse 모드 바: ← 등록됨 + 비용 캡션 */
 .browse-modebar {
@@ -2607,4 +2616,10 @@ body.row-resizing * {
 /* 프리뷰 탭 마커(▦) — 인디고로 SQL 탭과 구분(#54) */
 .tab-kind {
   color: var(--meta);
+}
+
+/* 직접 등록 다이얼로그 — 중복(등록 차단) 오류. 앰버는 서버 비용 전용이라 danger 사용 */
+.modal-msg.dup-warn {
+  color: var(--danger);
+  font-size: 12px;
 }
