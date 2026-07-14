@@ -1,5 +1,49 @@
 import { describe, expect, it } from 'vitest'
-import { derivePreviewPager, shouldApplyPreviewUpdate } from './previewPagination'
+import {
+  derivePreviewPager,
+  shouldApplyPreviewUpdate,
+  shouldShowRunOverlay
+} from './previewPagination'
+
+describe('shouldShowRunOverlay', () => {
+  it('keeps Preview waiting visible until its first row is committed', () => {
+    expect(
+      shouldShowRunOverlay({
+        running: true,
+        streamingPreview: true,
+        hasResult: true,
+        previewAvailableRows: 0
+      })
+    ).toBe(true)
+    expect(
+      shouldShowRunOverlay({
+        running: true,
+        streamingPreview: true,
+        hasResult: true,
+        previewAvailableRows: 1
+      })
+    ).toBe(false)
+  })
+
+  it('preserves the normal query overlay and hides all overlays after completion', () => {
+    expect(
+      shouldShowRunOverlay({
+        running: true,
+        streamingPreview: false,
+        hasResult: true,
+        previewAvailableRows: 10
+      })
+    ).toBe(true)
+    expect(
+      shouldShowRunOverlay({
+        running: false,
+        streamingPreview: true,
+        hasResult: true,
+        previewAvailableRows: 0
+      })
+    ).toBe(false)
+  })
+})
 
 describe('derivePreviewPager', () => {
   it('enables Next only after the first row of the next local page is committed', () => {

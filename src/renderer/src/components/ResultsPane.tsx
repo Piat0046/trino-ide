@@ -28,6 +28,7 @@ import {
   buildRecordSnapshot,
   type RecordSnapshot
 } from '../lib/cellFormat'
+import { shouldShowRunOverlay } from '../lib/previewPagination'
 
 const api = window.api
 
@@ -570,6 +571,17 @@ export function ResultsPane({
                 : previewState === 'failed'
                   ? 'FAILED'
                   : null
+  const showRunOverlay = shouldShowRunOverlay({
+    running,
+    streamingPreview,
+    hasResult: result !== null,
+    previewAvailableRows
+  })
+  const runStatusLabel = streamingPreview
+    ? previewState === 'running'
+      ? 'Preview 결과 대기 중'
+      : 'Preview 수신 준비 중'
+    : (progress?.state ?? '실행 준비 중')
   const num = (n?: number): string | null => (n == null ? null : n.toLocaleString())
   const statGroups: { title: string; items: [string, string][] }[] = stats
     ? [
@@ -749,14 +761,14 @@ export function ResultsPane({
       </div>
 
       <div className="results-body">
-        {running && (!streamingPreview || !result) ? (
+        {showRunOverlay ? (
           <div className="results-status">
             <div className="run-overlay">
               <span className="spin" />
               <div className="run-info">
                 <div className="run-elapsed">{(elapsed / 1000).toFixed(1)}s</div>
                 <div className="run-meta">
-                  {progress?.state ?? '실행 준비 중'}
+                  {runStatusLabel}
                   {progress?.processedRows != null &&
                     ` · ${progress.processedRows.toLocaleString()} rows 스캔`}
                   {progress?.processedBytes != null && ` · ${formatBytes(progress.processedBytes)}`}

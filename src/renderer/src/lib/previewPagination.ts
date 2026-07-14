@@ -18,6 +18,13 @@ export interface PreviewPagerView {
   warning: boolean
 }
 
+export interface RunOverlayInput {
+  running: boolean
+  streamingPreview: boolean
+  hasResult: boolean
+  previewAvailableRows: number
+}
+
 const STATE_RANK: Record<PreviewSessionState, number> = {
   starting: 0,
   running: 1,
@@ -36,6 +43,13 @@ export function shouldApplyPreviewUpdate(
   if (!previous || previous.sessionId !== next.sessionId) return true
   if (next.availableRows < previous.availableRows) return false
   return STATE_RANK[next.state] >= STATE_RANK[previous.state]
+}
+
+/** Preview는 첫 행 전까지만 대기 화면을 보이고, 이후에는 실행 중에도 저장된 그리드를 유지한다. */
+export function shouldShowRunOverlay(input: RunOverlayInput): boolean {
+  if (!input.running) return false
+  if (!input.streamingPreview) return true
+  return !input.hasResult || input.previewAvailableRows <= 0
 }
 
 /** Main process에 append 완료된 행만으로 로컬 Preview 페이저 상태를 계산한다. */
