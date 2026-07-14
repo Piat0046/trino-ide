@@ -3,10 +3,14 @@ import { writeFile } from 'node:fs/promises'
 import type {
   HostInput,
   IpcResult,
+  GetPreviewPageRequest,
+  PreviewPage,
+  PreviewSessionUpdate,
   QueryResultPayload,
   RunQueryRequest,
   SaveFileResult,
-  SaveTextInput
+  SaveTextInput,
+  StartPreviewRequest
 } from '@shared/types'
 import type {
   AppSettings,
@@ -45,10 +49,23 @@ import {
   runQuery,
   SAFETY_CAP
 } from './trino/client'
+import { createDefaultPreviewSessionManager } from './trino/previewSession'
 import type { QueryErrorInfo } from '@shared/types'
 
 /** 진행 중인 쿼리: requestId -> 토큰 + 접속 정보(서버 측 취소에 필요) */
 const active = new Map<string, { token: CancelToken; conn: ResolvedConn }>()
+const previewSessions = createDefaultPreviewSessionManager()
+const registeredPreviewOwners = new Set<number>()
+
+/** 앱 시작 시 temp root 및 이전 비정상 종료 잔여물을 best-effort로 준비한다. */
+export async function initializePreviewSessions(): Promise<void> {
+  await previewSessions.initialize()
+}
+
+/** 앱 종료 전 서버 쿼리, 파일 핸들, 실행별 temp root를 정리한다. */
+export async function disposeAllPreviewSessions(): Promise<void> {
+  await previewSessions.disposeAll()
+}
 
 function errorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
@@ -176,6 +193,53 @@ export function registerIpcHandlers(): void {
     if (entry.token.trinoQueryId) {
       await cancelQuery(entry.conn, entry.token.trinoQueryId)
     }
+  })
+
+  // ----- table preview -----
+  ipcMain.handle(
+    'preview:start',
+    async (event, req: StartPreviewRequest): Promise<IpcResult<PreviewSessionUpdate>> => {
+      try {
+        const stored = getStoredHost(req.hostId)
+        if (!stored) return { ok: false, error: '등록된 host를 찾을 수 없습니다.' }
+
+        const ownerId = event.sender.id
+        if (!registeredPreviewOwners.has(ownerId)) {
+          registeredPreviewOwners.add(ownerId)
+          event.sender.once('destroyed', () => {
+            registeredPreviewOwners.delete(ownerId)
+            void previewSessions.disposeOwner(ownerId)
+          })
+        }
+
+        const value = await previewSessions.start(req, toConn(stored), ownerId, (update) => {
+          if (!event.sender.isDestroyed()) event.sender.send('preview:update', update)
+        })
+        return { ok: true, value }
+      } catch (e) {
+        return { ok: false, error: errorMessage(e) }
+      }
+    }
+  )
+
+  ipcMain.handle(
+    'preview:getPage',
+    async (event, req: GetPreviewPageRequest): Promise<IpcResult<PreviewPage>> => {
+      try {
+        const value = await previewSessions.getPage(req, event.sender.id)
+        return { ok: true, value }
+      } catch (e) {
+        return { ok: false, error: errorMessage(e) }
+      }
+    }
+  )
+
+  ipcMain.handle('preview:cancel', async (event, sessionId: string) => {
+    await previewSessions.cancel(sessionId, event.sender.id)
+  })
+
+  ipcMain.handle('preview:dispose', async (event, sessionId: string) => {
+    await previewSessions.dispose(sessionId, event.sender.id)
   })
 
   // ----- history -----

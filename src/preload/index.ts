@@ -8,6 +8,10 @@ const api: TrinoIdeApi = {
   testHost: (input) => ipcRenderer.invoke('hosts:test', input),
   runQuery: (req) => ipcRenderer.invoke('query:run', req),
   cancelQuery: (requestId) => ipcRenderer.invoke('query:cancel', requestId),
+  startPreview: (req) => ipcRenderer.invoke('preview:start', req),
+  getPreviewPage: (req) => ipcRenderer.invoke('preview:getPage', req),
+  cancelPreview: (sessionId) => ipcRenderer.invoke('preview:cancel', sessionId),
+  disposePreview: (sessionId) => ipcRenderer.invoke('preview:dispose', sessionId),
   listHistory: () => ipcRenderer.invoke('history:list'),
   deleteHistory: (id) => ipcRenderer.invoke('history:delete', id),
   clearHistory: () => ipcRenderer.invoke('history:clear'),
@@ -33,6 +37,11 @@ const api: TrinoIdeApi = {
     const listener = (_e: unknown, payload: Parameters<typeof cb>[0]): void => cb(payload)
     ipcRenderer.on('query:progress', listener)
     return () => ipcRenderer.removeListener('query:progress', listener)
+  },
+  onPreviewUpdate: (cb) => {
+    const listener = (_e: unknown, payload: Parameters<typeof cb>[0]): void => cb(payload)
+    ipcRenderer.on('preview:update', listener)
+    return () => ipcRenderer.removeListener('preview:update', listener)
   }
 }
 

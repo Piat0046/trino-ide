@@ -3,7 +3,12 @@ import type { HostEnv } from '@shared/types'
 import { EditorTabs, type TabView } from './EditorTabs'
 import { EnvBadge } from './EnvBadge'
 import { FilterBar } from './FilterBar'
-import { buildPreviewSql, LIMIT_PRESETS, type PreviewFilter } from '../lib/previewQuery'
+import {
+  buildPreviewSql,
+  MAX_ROWS_PRESETS,
+  PAGE_SIZE_PRESETS,
+  type PreviewFilter
+} from '../lib/previewQuery'
 import type { PreviewSpec } from '../lib/tabs'
 import { IconExternal, IconPlay, IconStop } from './icons'
 
@@ -29,7 +34,8 @@ interface Props {
   hostName: string
   hostEnv?: HostEnv
   onChangeFilters: (filters: PreviewFilter[]) => void
-  onChangeLimit: (limit: number) => void
+  onChangePageSize: (pageSize: number) => void
+  onChangeMaxRows: (maxRows: number) => void
   onRun: () => void
   onCancel: () => void
   onClear: () => void
@@ -58,24 +64,19 @@ export function PreviewPane({
   hostName,
   hostEnv,
   onChangeFilters,
-  onChangeLimit,
+  onChangePageSize,
+  onChangeMaxRows,
   onRun,
   onCancel,
   onClear,
   onOpenInEditor
 }: Props): JSX.Element {
-  // 변경 대기: 현재 필터(라이브)로 만든 SQL이 마지막 실행 SQL과 다르면 ●
-  // (page/orderBy는 즉시 재조회라 lastRunSql에 반영됨 → 필터 편집만 staged로 뜬다)
+  // 로컬 pageSize는 제외하고 라이브 필터/전체 한도가 현재 스트림 SQL과 다르면 ●.
+  // (pageSize는 로컬 표시 설정이고 orderBy는 즉시 새 스트림에 반영 → 필터 편집만 staged로 뜬다)
   const staged =
-    buildPreviewSql(
-      preview,
-      preview.filters,
-      preview.limit,
-      preview.page,
-      preview.orderBy,
-      columns
-    ) !== lastRunSql
-  const limitInPresets = LIMIT_PRESETS.includes(preview.limit)
+    buildPreviewSql(preview, preview.filters, preview.maxRows, preview.orderBy) !== lastRunSql
+  const pageSizeInPresets = PAGE_SIZE_PRESETS.includes(preview.pageSize)
+  const maxRowsInPresets = MAX_ROWS_PRESETS.includes(preview.maxRows)
   const hasFilters = preview.filters.length > 0
 
   const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>): void => {
@@ -128,15 +129,31 @@ export function PreviewPane({
             필터 비우기
           </button>
         )}
-        <label className="preview-limit" title="페이지당 행 수 · 바꾸면 페이지 1부터 다시 조회 · 서버 조회 1회">
-          LIMIT
+        <label className="preview-limit" title="페이지당 표시 행 수 · 서버를 다시 조회하지 않아요">
+          <span className="preview-limit-label">페이지</span>
           <select
-            aria-label="표시 행 상한"
-            value={preview.limit}
-            onChange={(e) => onChangeLimit(Number(e.target.value))}
+            aria-label="페이지당 행 수"
+            value={preview.pageSize}
+            onChange={(e) => onChangePageSize(Number(e.target.value))}
           >
-            {!limitInPresets && <option value={preview.limit}>{preview.limit}</option>}
-            {LIMIT_PRESETS.map((n) => (
+            {!pageSizeInPresets && <option value={preview.pageSize}>{preview.pageSize}</option>}
+            {PAGE_SIZE_PRESETS.map((n) => (
+              <option key={n} value={n}>
+                {n.toLocaleString()}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="preview-limit" title="Preview 쿼리 1회에서 받을 총 행 상한 · 바꾸면 새로 조회해요">
+          <span className="preview-limit-label">전체 한도</span>
+          <select
+            aria-label="Preview 전체 행 한도"
+            value={preview.maxRows}
+            disabled={running}
+            onChange={(e) => onChangeMaxRows(Number(e.target.value))}
+          >
+            {!maxRowsInPresets && <option value={preview.maxRows}>{preview.maxRows}</option>}
+            {MAX_ROWS_PRESETS.map((n) => (
               <option key={n} value={n}>
                 {n.toLocaleString()}
               </option>
@@ -158,8 +175,8 @@ export function PreviewPane({
             onClick={onRun}
             title={
               staged
-                ? '대기 중인 필터·LIMIT를 적용해 서버에서 다시 가져와요 (⌘↵) · 서버 조회 1회'
-                : '서버에서 다시 조회 · 서버 조회 1회 (⌘↵)'
+                ? '대기 중인 필터·전체 한도를 적용해 새 스트림을 시작해요 (⌘↵)'
+                : '새 Preview 스트림으로 다시 조회해요 (⌘↵)'
             }
           >
             {staged && <span className="staged-dot" aria-hidden />}

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import type {
+  PreviewSessionState,
   QueryColumn,
   QueryErrorInfo,
   QueryResultPayload,
@@ -41,16 +42,18 @@ interface Props {
   onSelectRecord?: (snap: RecordSnapshot | null) => void
   /** 프리뷰 탭(#54)에서만 전달 — 컬럼 헤더/셀 우클릭 "필터 추가". 없으면 메뉴 항목 숨김. */
   onAddFilter?: (origIndex: number, value?: unknown) => void
-  /** 프리뷰 페이저(있으면 .transport에 ◀ 페이지 N ▶ 표시). 서버 왕복 per 페이지. */
+  /** 프리뷰 로컬 페이저(있으면 .transport에 ◀ 페이지 N ▶ 표시). */
   pager?: {
     page: number
     rangeFrom: number
     rangeTo: number
     canPrev: boolean
     canNext: boolean
-    atCap: boolean
-    sortLabel: string
-    sortDir: 'asc' | 'desc'
+    /** 수신 진행/완료/한도/부분 결과를 구분해 보여줄 완성된 UI 문구. */
+    statusLabel: string
+    warning: boolean
+    sortLabel?: string
+    sortDir?: 'asc' | 'desc'
   }
   onPrevPage?: () => void
   onNextPage?: () => void
@@ -60,6 +63,13 @@ interface Props {
   onServerSort?: (origIndex: number, dir: 'asc' | 'desc') => void
   /** 행번호 gutter 시작 오프셋(프리뷰 페이지: page*pageSize → 501.. 식 절대 번호) */
   rowIndexOffset?: number
+  /** Preview는 nextUri 수신 중에도 이미 저장된 현재 페이지를 계속 보여준다. */
+  streamingPreview?: boolean
+  /** Preview session/page identity. 같은 페이지의 스트림 행이 늘어도 스크롤을 초기화하지 않는다. */
+  resultKey?: string
+  /** Preview일 때 generic QueryResult 통계 대신 실제 세션 상태를 표시한다. */
+  previewState?: PreviewSessionState
+  previewAvailableRows?: number
 }
 
 const HEAD_H = 42
@@ -151,7 +161,11 @@ export function ResultsPane({
   onNextPage,
   previewSort,
   onServerSort,
-  rowIndexOffset = 0
+  rowIndexOffset = 0,
+  streamingPreview = false,
+  resultKey,
+  previewState,
+  previewAvailableRows = 0
 }: Props): JSX.Element {
   const [tab, setTab] = useState<'results' | 'messages'>('results')
   // 프리뷰 서버정렬 모드: 헤더 클릭=서버 ORDER BY, 클라 정렬 비활성(서버가 이미 정렬)
@@ -180,6 +194,7 @@ export function ResultsPane({
   const [ctxMenu, setCtxMenu] = useState<CtxMenu | null>(null)
   const [sort, setSort] = useState<SortState | null>(null)
   const [sel, setSel] = useState<CellSel | null>(null)
+  const selectionResultKeyRef = useRef<string | undefined>(undefined)
   const [flash, setFlash] = useState<string | null>(null)
   // 컬럼 찾기: 이름 부분일치로 매칭 → 해당 컬럼으로 가로 스크롤(여러 개면 순회)
   const [find, setFind] = useState('')
@@ -191,15 +206,27 @@ export function ResultsPane({
   const exportWrapRef = useRef<HTMLDivElement>(null)
   const ctxMenuRef = useRef<HTMLDivElement>(null)
 
+  const autoTabKey = streamingPreview
+    ? `${resultKey ?? 'preview'}:${result ? 'result' : 'empty'}`
+    : (resultKey ?? result)
   useEffect(() => {
     if (error) setTab('messages')
     else if (result) setTab('results')
-  }, [result, error])
+  }, [autoTabKey, error, streamingPreview])
 
+  const scrollResetKey = resultKey ?? result
   useEffect(() => {
     if (scrollAnimRef.current != null) cancelAnimationFrame(scrollAnimRef.current)
     parentRef.current?.scrollTo(0, 0)
-  }, [result])
+  }, [scrollResetKey])
+
+  // Preview 페이지/세션이 바뀌면 이전 페이지 셀 선택과 Inspector 스냅샷을 지운다.
+  useEffect(() => {
+    if (resultKey) {
+      selectionResultKeyRef.current = undefined
+      setSel(null)
+    }
+  }, [resultKey])
 
   // 언마운트 시 진행 중 스크롤 애니메이션 정리
   useEffect(
@@ -454,6 +481,7 @@ export function ResultsPane({
   }
 
   const selectCell = (row: number, origIndex: number): void => {
+    selectionResultKeyRef.current = resultKey
     setSel({ row, origIndex })
     parentRef.current?.focus()
   }
@@ -465,6 +493,10 @@ export function ResultsPane({
   useEffect(() => {
     const emit = emitRef.current
     if (!emit) return
+    if (resultKey && selectionResultKeyRef.current !== resultKey) {
+      emit(null)
+      return
+    }
     if (!sel || !result) {
       emit(null)
       return
@@ -503,7 +535,41 @@ export function ResultsPane({
   const cancelled = result?.cancelled ?? false
   // 중지되었거나 FINISHED가 아니면 통계가 미확정(잠정) — 배너 + 값 흐리게로 신호.
   // (중지 시 stats가 아예 없을 수 있어 cancelled를 먼저 반영해야 '확정'으로 오표기되지 않음)
-  const finished = !cancelled && (!stats || stats.state === 'FINISHED')
+  const finished = previewState
+    ? previewState === 'finished'
+    : !running && !cancelled && (!stats || stats.state === 'FINISHED')
+  const previewStatusLabel =
+    previewState === 'starting'
+      ? '수신 준비 중'
+      : previewState === 'running'
+        ? '수신 중'
+        : previewState === 'finished'
+          ? '확정'
+          : previewState === 'cancelled'
+            ? '중지됨'
+            : previewState === 'row_limit'
+              ? 'Preview 한도'
+              : previewState === 'size_limit'
+                ? '저장 한도'
+                : previewState === 'failed'
+                  ? '실패'
+                  : null
+  const previewStatusCode =
+    previewState === 'starting'
+      ? 'STARTING'
+      : previewState === 'running'
+        ? 'RUNNING'
+        : previewState === 'finished'
+          ? 'FINISHED'
+          : previewState === 'cancelled'
+            ? 'CANCELED'
+            : previewState === 'row_limit'
+              ? 'ROW LIMIT'
+              : previewState === 'size_limit'
+                ? 'SIZE LIMIT'
+                : previewState === 'failed'
+                  ? 'FAILED'
+                  : null
   const num = (n?: number): string | null => (n == null ? null : n.toLocaleString())
   const statGroups: { title: string; items: [string, string][] }[] = stats
     ? [
@@ -683,7 +749,7 @@ export function ResultsPane({
       </div>
 
       <div className="results-body">
-        {running ? (
+        {running && (!streamingPreview || !result) ? (
           <div className="results-status">
             <div className="run-overlay">
               <span className="spin" />
@@ -723,8 +789,8 @@ export function ResultsPane({
               <div className="msg-status">
                 <span className={'msg-badge ' + (finished ? 'ok' : 'warn')}>
                   <span className="msg-badge-dot" />
-                  {cancelled ? '중지됨' : finished ? '확정' : '잠정'} ·{' '}
-                  {cancelled ? 'CANCELED' : (stats?.state ?? 'FINISHED')}
+                  {previewStatusLabel ?? (cancelled ? '중지됨' : finished ? '확정' : '잠정')} ·{' '}
+                  {previewStatusCode ?? (cancelled ? 'CANCELED' : (stats?.state ?? 'FINISHED'))}
                 </span>
                 {result.queryId && (
                   <button
@@ -737,23 +803,52 @@ export function ResultsPane({
                 )}
               </div>
 
-              {cancelled && (
-                <div className="warn-banner">
-                  ⏹ 실행을 중지했습니다. 아래 통계·결과는 중지 시점까지 받은 부분값이며, 통계는
-                  하한입니다.
-                </div>
-              )}
-              {!finished && !cancelled && (
-                <div className="warn-banner">
-                  결과를 끝까지 받지 않아 통계가 확정되지 않았습니다 (LIMIT 도달). 아래 값은
-                  하한입니다.
-                </div>
+              {previewState ? (
+                <>
+                  {(previewState === 'starting' || previewState === 'running') && (
+                    <div className="warn-banner">
+                      Preview 결과를 수신 중입니다. 아래 통계는 아직 잠정값입니다.
+                    </div>
+                  )}
+                  {previewState === 'cancelled' && (
+                    <div className="warn-banner">
+                      ⏹ Preview 수신을 중지했습니다. 저장된{' '}
+                      {(previewAvailableRows ?? result.rowCount).toLocaleString()}행만 표시합니다.
+                    </div>
+                  )}
+                  {previewState === 'row_limit' && (
+                    <div className="warn-banner">
+                      Preview 전체 행 한도에서 수신을 마쳤습니다. 실제 테이블 전체 행 수는 아닙니다.
+                    </div>
+                  )}
+                  {previewState === 'size_limit' && (
+                    <div className="warn-banner">
+                      Preview 임시 저장 256 MiB 한도에서 중지했습니다. 저장된 행만 표시합니다.
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  {cancelled && (
+                    <div className="warn-banner">
+                      ⏹ 실행을 중지했습니다. 아래 통계·결과는 중지 시점까지 받은 부분값이며, 통계는
+                      하한입니다.
+                    </div>
+                  )}
+                  {!finished && !cancelled && (
+                    <div className="warn-banner">
+                      결과를 끝까지 받지 않아 통계가 확정되지 않았습니다 (LIMIT 도달). 아래 값은
+                      하한입니다.
+                    </div>
+                  )}
+                </>
               )}
 
               {/* 핵심 지표 */}
               <div className="msg-keyrow">
                 <span>
-                  <b>{result.rowCount.toLocaleString()}</b> rows
+                  <b>{result.rowCount.toLocaleString()}</b>{' '}
+                  {previewState ? '현재 페이지 rows' : 'rows'}
                 </span>
                 {stats?.elapsedMs != null && (
                   <span>
@@ -891,7 +986,13 @@ export function ResultsPane({
           </div>
         ) : (
           <>
-            {cancelled && (
+            {previewState === 'cancelled' && (
+              <div className="warn-banner">
+                ⏹ Preview 수신을 중지했습니다 — 현재 페이지 {result.rowCount.toLocaleString()}행 / 저장된{' '}
+                {(previewAvailableRows ?? result.rowCount).toLocaleString()}행
+              </div>
+            )}
+            {cancelled && !streamingPreview && !previewState && (
               <div className="warn-banner">
                 ⏹ 실행을 중지했습니다 — 아래는 중지 시점까지 받은 {result.rowCount.toLocaleString()}
                 행입니다.
@@ -1096,7 +1197,7 @@ export function ResultsPane({
         </div>
       )}
 
-      {result && !running && (
+      {result && (!running || streamingPreview) && (
         <div className="transport">
           {pager && (
             <span className="pager" role="group" aria-label="페이지 이동">
@@ -1104,7 +1205,7 @@ export function ResultsPane({
                 className="pager-btn"
                 aria-label="이전 페이지"
                 disabled={!pager.canPrev}
-                title="이전 페이지 · 서버 조회 1회"
+                title="이전 페이지 · 로컬 결과"
                 onClick={onPrevPage}
               >
                 <IconChevronLeft size={13} />
@@ -1122,39 +1223,28 @@ export function ResultsPane({
                 className="pager-btn"
                 aria-label="다음 페이지"
                 disabled={!pager.canNext}
-                title={
-                  pager.canNext
-                    ? '다음 페이지 · 서버 조회 1회'
-                    : pager.atCap
-                      ? '더 깊은 페이지는 막혀 있어요 — WHERE로 좁히거나 SQL 편집기로 여세요'
-                      : '마지막 페이지예요'
-                }
+                title={pager.canNext ? '다음 페이지 · 로컬 결과' : pager.statusLabel}
                 onClick={onNextPage}
               >
                 <IconChevronRight size={13} />
               </button>
-              <span
-                className="pager-sort"
-                title="이 순서로 페이지를 나눠요 · 헤더 클릭으로 변경"
-              >
-                정렬 {pager.sortLabel} {pager.sortDir === 'asc' ? '▲' : '▼'}
-              </span>
-              {pager.atCap && (
-                <span className="pager-cap" style={{ color: 'var(--warn)' }}>
-                  ⚠ WHERE로 좁히세요
+              {pager.sortLabel && pager.sortDir && (
+                <span
+                  className="pager-sort"
+                  title="이 순서로 전체 Preview 스트림을 정렬해요 · 헤더 클릭으로 변경"
+                >
+                  정렬 {pager.sortLabel} {pager.sortDir === 'asc' ? '▲' : '▼'}
                 </span>
               )}
-              {!pager.canNext && !pager.atCap && pager.page > 0 && (
-                <span className="pager-end" title="마지막 페이지예요">
-                  끝
-                </span>
-              )}
+              <span className={pager.warning ? 'pager-cap' : 'pager-end'}>{pager.statusLabel}</span>
             </span>
           )}
           <span
             className={'ft-state ' + (finished ? 'ok' : 'warn')}
             title={
-              cancelled
+              previewStatusLabel
+                ? `${previewStatusLabel} · ${previewStatusCode}`
+                : cancelled
                 ? '실행 중지됨 — 중지 시점까지의 부분 결과'
                 : finished
                   ? '확정된 통계'
@@ -1172,7 +1262,8 @@ export function ResultsPane({
             </span>
           )}
           <span className="stat">
-            <b>{result.rowCount.toLocaleString()}</b> {result.truncated ? 'rows (상한)' : 'rows'}
+            <b>{result.rowCount.toLocaleString()}</b>{' '}
+            {previewState ? '현재 페이지 rows' : result.truncated ? 'rows (상한)' : 'rows'}
           </span>
           {sort && (
             <span className="stat sort-note">

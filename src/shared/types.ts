@@ -109,6 +109,57 @@ export interface RunQueryRequest {
   recordHistory?: boolean
 }
 
+/** 테이블 Preview 전용 스트리밍 세션 상태. 일반 SQL 실행과는 별도 생명주기를 갖는다. */
+export type PreviewSessionState =
+  | 'starting'
+  | 'running'
+  | 'finished'
+  | 'cancelled'
+  | 'failed'
+  | 'row_limit'
+  | 'size_limit'
+
+/** Renderer가 sessionId를 발급하고, 서버에는 SQL을 한 번만 제출한다. */
+export interface StartPreviewRequest {
+  sessionId: string
+  hostId: string
+  sql: string
+  /** 이 세션이 로컬에 보관할 최대 행 수. 페이지 크기와는 무관하다. */
+  maxRows: number
+}
+
+/** 이미 로컬에 보관된 Preview 행 중 원하는 구간을 읽는다. */
+export interface GetPreviewPageRequest {
+  sessionId: string
+  offset: number
+  limit: number
+}
+
+/** Preview 실행/수신 상태 이벤트이자 startPreview의 초기 응답 스냅샷. */
+export interface PreviewSessionUpdate {
+  sessionId: string
+  state: PreviewSessionState
+  columns: QueryColumn[]
+  /** 파일 append까지 완료돼 즉시 읽을 수 있는 행 수 */
+  availableRows: number
+  storedBytes: number
+  stats?: QueryStatsSummary
+  error?: string
+  errorInfo?: QueryErrorInfo
+  warnings?: string[]
+  infoUri?: string
+  queryId?: string
+}
+
+/** 로컬 Preview 저장소에서 읽은 한 페이지와 같은 시점의 세션 상태. */
+export interface PreviewPage {
+  sessionId: string
+  offset: number
+  rows: unknown[][]
+  availableRows: number
+  state: PreviewSessionState
+}
+
 /** 앱 전역 설정(현재 사용자 설정 항목 없음 — 향후 확장용). */
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface AppSettings {}
@@ -265,6 +316,10 @@ export interface TrinoIdeApi {
   testHost(input: HostInput): Promise<IpcResult<QueryResultPayload>>
   runQuery(req: RunQueryRequest): Promise<IpcResult<QueryResultPayload>>
   cancelQuery(requestId: string): Promise<void>
+  startPreview(req: StartPreviewRequest): Promise<IpcResult<PreviewSessionUpdate>>
+  getPreviewPage(req: GetPreviewPageRequest): Promise<IpcResult<PreviewPage>>
+  cancelPreview(sessionId: string): Promise<void>
+  disposePreview(sessionId: string): Promise<void>
   listHistory(): Promise<HistoryEntry[]>
   deleteHistory(id: string): Promise<void>
   clearHistory(): Promise<void>
@@ -292,4 +347,6 @@ export interface TrinoIdeApi {
   clearAllMetadata(hostId: string): Promise<void>
   /** 실행 진행 상황 이벤트 구독. 반환값 호출로 구독 해제. */
   onQueryProgress(cb: (progress: QueryProgress) => void): () => void
+  /** 테이블 Preview의 행 수신/종료 상태 이벤트 구독. 반환값 호출로 구독 해제. */
+  onPreviewUpdate(cb: (update: PreviewSessionUpdate) => void): () => void
 }

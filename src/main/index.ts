@@ -1,6 +1,6 @@
 import { app, BrowserWindow, shell } from 'electron'
 import { join } from 'node:path'
-import { registerIpcHandlers } from './ipc'
+import { disposeAllPreviewSessions, initializePreviewSessions, registerIpcHandlers } from './ipc'
 import { listHistory } from './store/history'
 import { getStoredHost } from './store/hosts'
 import { isBackfilled, markBackfilled } from './store/metadata'
@@ -55,11 +55,25 @@ function createWindow(): void {
 
 app.whenReady().then(() => {
   registerIpcHandlers()
+  void initializePreviewSessions().catch(() => undefined)
   backfillMetadataFromHistory()
   createWindow()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
+  })
+})
+
+let previewCleanupStarted = false
+let previewCleanupFinished = false
+app.on('before-quit', (event) => {
+  if (previewCleanupFinished) return
+  event.preventDefault()
+  if (previewCleanupStarted) return
+  previewCleanupStarted = true
+  void disposeAllPreviewSessions().finally(() => {
+    previewCleanupFinished = true
+    app.quit()
   })
 })
 

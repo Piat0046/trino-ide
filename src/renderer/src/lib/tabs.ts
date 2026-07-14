@@ -1,19 +1,30 @@
 import type { QueryErrorInfo, QueryResultPayload, QueryStatsSummary } from '@shared/types'
-import { buildPreviewSql, DEFAULT_LIMIT, type OrderBy, type PreviewFilter } from './previewQuery'
+import {
+  buildPreviewSql,
+  DEFAULT_MAX_ROWS,
+  DEFAULT_PAGE_SIZE,
+  type OrderBy,
+  type PreviewFilter
+} from './previewQuery'
 
-/** 테이블 프리뷰 탭 상태(#54). filters/limit는 편집 대상, tab.sql=마지막 실행 SQL. */
+/** 테이블 프리뷰 탭 상태(#54). tab.sql=마지막으로 시작한 단일 스트림 SQL. */
 export interface PreviewSpec {
   catalog: string
   schema: string
   table: string
   filters: PreviewFilter[]
-  limit: number
+  /** 로컬 표시 단위. 변경해도 서버를 다시 조회하지 않는다. */
+  pageSize: number
+  /** Preview 쿼리 1회의 총 행 안전 한도. */
+  maxRows: number
   /** 마지막 조회 시 실제 적용된(enabled+유효) 필터 스냅샷 — 행별 적용됨/대기 판정용 */
   appliedFilters?: PreviewFilter[]
-  /** 현재 페이지(0-base). Prev/Next로만 변경, 필터/정렬/LIMIT 적용 시 0 리셋 */
+  /** 현재 로컬 페이지(0-base). 필터/정렬/전체 한도 적용 시 0 리셋. */
   page: number
-  /** 서버 정렬(ORDER BY). null이면 기본 첫 컬럼(ORDER BY 1) */
+  /** 사용자가 명시한 서버 정렬. null이면 ORDER BY를 보내지 않는다. */
   orderBy: OrderBy | null
+  /** Main process에서 소유하는 현재 Preview 세션. null은 미실행. */
+  sessionId: string | null
 }
 
 /** 에디터 탭 1개 = 독립 SQL 문서. 저장 쿼리 바인딩(savedQueryId!=null) 또는 스크래치. */
@@ -102,8 +113,16 @@ export function makePreview(
   ref: { catalog: string; schema: string; table: string },
   hostId: string | null
 ): EditorTab {
-  const preview: PreviewSpec = { ...ref, filters: [], limit: DEFAULT_LIMIT, page: 0, orderBy: null }
-  const sql = buildPreviewSql(ref, preview.filters, preview.limit, preview.page, preview.orderBy)
+  const preview: PreviewSpec = {
+    ...ref,
+    filters: [],
+    pageSize: DEFAULT_PAGE_SIZE,
+    maxRows: DEFAULT_MAX_ROWS,
+    page: 0,
+    orderBy: null,
+    sessionId: null
+  }
+  const sql = buildPreviewSql(ref, preview.filters, preview.maxRows, preview.orderBy)
   return {
     id: crypto.randomUUID(),
     savedQueryId: null,

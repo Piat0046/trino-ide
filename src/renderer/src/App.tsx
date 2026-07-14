@@ -12,7 +12,10 @@ import type {
   HostInput,
   HostMetadata,
   MetadataRef,
+  PreviewSessionState,
+  PreviewSessionUpdate,
   QueryFolder,
+  QueryResultPayload,
   SavedLibrary,
   SavedQuery
 } from '@shared/types'
@@ -51,17 +54,49 @@ import { RegisterTableDialog } from './components/RegisterTableDialog'
 import {
   buildPreviewSql,
   buildPredicate,
+  DEFAULT_MAX_ROWS,
   isOrderable,
-  PREVIEW_OFFSET_CAP,
+  MAX_ROWS_PRESETS,
+  resolvePreviewStartTarget,
   type OrderBy,
   type PreviewFilter
 } from './lib/previewQuery'
+import { derivePreviewPager, shouldApplyPreviewUpdate } from './lib/previewPagination'
 
-/** 프리뷰 실행 성공 시에만 커밋할 스냅샷(거짓 이동/적용 방지) */
-interface PreviewCommit {
-  appliedFilters: PreviewFilter[]
+type PreviewRuntime = PreviewSessionUpdate
+
+interface PreviewPageTarget {
+  sessionId: string
   page: number
-  orderBy: OrderBy | null
+  pageSize: number
+}
+
+interface PreviewReadFlight extends PreviewPageTarget {
+  seq: number
+  refreshRequested: boolean
+}
+
+const isPreviewRunning = (state: PreviewSessionState): boolean =>
+  state === 'starting' || state === 'running'
+
+function previewPageResult(
+  runtime: PreviewRuntime,
+  sql: string,
+  rows: unknown[][]
+): QueryResultPayload {
+  return {
+    columns: runtime.columns,
+    rows,
+    rowCount: rows.length,
+    // Preview 한도 사유는 페이저 세션 상태에서 표시한다. 일반 쿼리 50k 절단 배너를 재사용하지 않는다.
+    truncated: false,
+    cancelled: runtime.state === 'cancelled',
+    stats: runtime.stats,
+    executedSql: sql,
+    warnings: runtime.warnings,
+    infoUri: runtime.infoUri,
+    queryId: runtime.queryId
+  }
 }
 import { hydrateSession, serializeSession } from './lib/session'
 
@@ -145,6 +180,20 @@ export default function App(): JSX.Element {
   const [panes, setPanes] = useState<Pane[]>(
     () => boot?.panes ?? [makePane([makeScratch('', null, 'Untitled query 1')])]
   )
+  const panesRef = useRef(panes)
+  panesRef.current = panes
+  // Preview 스트림 진행 상태는 재시작 복원 대상이 아닌 런타임 전용 상태다.
+  const [previewRuntimeByTab, setPreviewRuntimeByTab] = useState<Record<string, PreviewRuntime>>({})
+  const previewRuntimeRef = useRef<Record<string, PreviewRuntime>>({})
+  const activePreviewSessionRef = useRef<Record<string, string>>({})
+  const previewSqlRef = useRef<Record<string, string>>({})
+  const previewHostRef = useRef<Record<string, string>>({})
+  const previewPageTargetRef = useRef<Record<string, PreviewPageTarget>>({})
+  const previewReadSeqRef = useRef<Record<string, number>>({})
+  const previewReadFlightRef = useRef<Record<string, PreviewReadFlight>>({})
+  const previewLoadedRef = useRef<
+    Record<string, { sessionId: string; offset: number; limit: number; rowCount: number }>
+  >({})
   const [focusedPaneId, setFocusedPaneId] = useState<string>(() => boot?.focusedPaneId ?? '')
   // 분할 접기 등으로 사라진 pane의 인스펙터 스냅샷 키를 정리(무해하지만 누수 방지)
   useEffect(() => {
@@ -183,6 +232,203 @@ export default function App(): JSX.Element {
       prev.map((p) => ({ ...p, tabs: p.tabs.map((t) => (t.id === id ? { ...t, ...patch } : t)) }))
     )
   }, [])
+
+  /** Async Preview 응답을 React state에 커밋하는 시점에도 세션이 여전히 활성인지 확인한다. */
+  const updateActivePreviewTab = useCallback(
+    (tabId: string, sessionId: string, patch: Partial<EditorTab>): void => {
+      setPanes((prev) => {
+        if (activePreviewSessionRef.current[tabId] !== sessionId) return prev
+        return prev.map((p) => ({
+          ...p,
+          tabs: p.tabs.map((t) => (t.id === tabId ? { ...t, ...patch } : t))
+        }))
+      })
+    },
+    []
+  )
+
+  const clearPreviewRuntime = useCallback((tabId: string): void => {
+    delete previewRuntimeRef.current[tabId]
+    delete previewLoadedRef.current[tabId]
+    setPreviewRuntimeByTab((prev) => {
+      if (!(tabId in prev)) return prev
+      const next = { ...prev }
+      delete next[tabId]
+      return next
+    })
+  }, [])
+
+  /**
+   * Preview 탭이 소유한 세션을 더 이상 보여주지 않을 때 즉시 stale로 만든 뒤
+   * Main process에 cancel → dispose를 요청한다. 늦게 도착한 event/page는 ref guard에서 버려진다.
+   */
+  const disposePreviewTab = useCallback(
+    (tabId: string, sessionId: string | null): void => {
+      if (!sessionId || activePreviewSessionRef.current[tabId] !== sessionId) return
+      const runtime = previewRuntimeRef.current[tabId]
+      delete activePreviewSessionRef.current[tabId]
+      delete previewSqlRef.current[tabId]
+      delete previewHostRef.current[tabId]
+      delete previewPageTargetRef.current[tabId]
+      delete previewReadFlightRef.current[tabId]
+      previewReadSeqRef.current[tabId] = (previewReadSeqRef.current[tabId] ?? 0) + 1
+      clearPreviewRuntime(tabId)
+      void (async () => {
+        try {
+          if (!runtime || isPreviewRunning(runtime.state)) await api.cancelPreview(sessionId)
+          await api.disposePreview(sessionId)
+        } catch {
+          // Main process/app 종료와 경쟁하는 best-effort 정리.
+        }
+      })()
+    },
+    [clearPreviewRuntime]
+  )
+
+  const loadPreviewPage = useCallback(
+    async (tabId: string, sessionId: string, page: number, pageSize: number): Promise<void> => {
+      if (activePreviewSessionRef.current[tabId] !== sessionId) return
+      const offset = page * pageSize
+      const inFlight = previewReadFlightRef.current[tabId]
+      if (
+        inFlight?.sessionId === sessionId &&
+        inFlight.page === page &&
+        inFlight.pageSize === pageSize
+      ) {
+        // 같은 페이지의 진행 event는 진행 중 read를 폐기하지 않고 최신 snapshot 1회로 합친다.
+        inFlight.refreshRequested = true
+        return
+      }
+
+      const seq = (previewReadSeqRef.current[tabId] ?? 0) + 1
+      previewReadSeqRef.current[tabId] = seq
+      const flight: PreviewReadFlight = {
+        sessionId,
+        page,
+        pageSize,
+        seq,
+        refreshRequested: false
+      }
+      previewReadFlightRef.current[tabId] = flight
+      previewPageTargetRef.current[tabId] = { sessionId, page, pageSize }
+
+      const isCurrentRead = (): boolean => {
+        const target = previewPageTargetRef.current[tabId]
+        return (
+          activePreviewSessionRef.current[tabId] === sessionId &&
+          previewReadSeqRef.current[tabId] === seq &&
+          previewReadFlightRef.current[tabId] === flight &&
+          target?.sessionId === sessionId &&
+          target.page === page &&
+          target.pageSize === pageSize
+        )
+      }
+
+      try {
+        do {
+          flight.refreshRequested = false
+          const res = await api.getPreviewPage({ sessionId, offset, limit: pageSize })
+          if (!isCurrentRead()) return
+          if (!res.ok) {
+            updateActivePreviewTab(tabId, sessionId, {
+              error: res.error,
+              errorInfo: res.errorInfo ?? null
+            })
+            return
+          }
+          if (res.value.sessionId !== sessionId || res.value.offset !== offset) return
+          const runtime = previewRuntimeRef.current[tabId]
+          if (!runtime || runtime.sessionId !== sessionId) return
+          previewLoadedRef.current[tabId] = {
+            sessionId,
+            offset,
+            limit: pageSize,
+            rowCount: res.value.rows.length
+          }
+          updateActivePreviewTab(tabId, sessionId, {
+            result: previewPageResult(runtime, previewSqlRef.current[tabId] ?? '', res.value.rows),
+            ...(runtime.state === 'failed' ? {} : { error: null, errorInfo: null })
+          })
+        } while (flight.refreshRequested && isCurrentRead())
+      } catch (e) {
+        if (!isCurrentRead()) return
+        updateActivePreviewTab(tabId, sessionId, {
+          error: e instanceof Error ? e.message : String(e),
+          errorInfo: null
+        })
+      } finally {
+        if (previewReadFlightRef.current[tabId] === flight)
+          delete previewReadFlightRef.current[tabId]
+      }
+    },
+    [updateActivePreviewTab]
+  )
+
+  const applyPreviewUpdate = useCallback(
+    (tabId: string, update: PreviewSessionUpdate): void => {
+      if (activePreviewSessionRef.current[tabId] !== update.sessionId) return
+      const previous = previewRuntimeRef.current[tabId]
+      // startPreview 초기 응답이 더 최신인 IPC event보다 늦게 돌아와도 행 수/상태를 되돌리지 않는다.
+      if (!shouldApplyPreviewUpdate(previous, update)) return
+
+      const runtime: PreviewRuntime = {
+        ...previous,
+        ...update,
+        columns: update.columns.length > 0 ? update.columns : (previous?.columns ?? [])
+      }
+      previewRuntimeRef.current[tabId] = runtime
+      setPreviewRuntimeByTab((prev) =>
+        activePreviewSessionRef.current[tabId] === update.sessionId
+          ? { ...prev, [tabId]: runtime }
+          : prev
+      )
+
+      const failed = runtime.state === 'failed'
+      updateActivePreviewTab(tabId, update.sessionId, {
+        running: isPreviewRunning(runtime.state),
+        requestId: null,
+        progress: runtime.stats ?? null,
+        error: failed ? (runtime.error ?? 'Preview 조회에 실패했습니다.') : null,
+        errorInfo: failed ? (runtime.errorInfo ?? null) : null
+      })
+
+      const target = previewPageTargetRef.current[tabId]
+      if (!target || target.sessionId !== update.sessionId) return
+      const offset = target.page * target.pageSize
+      const expectedRows = Math.min(target.pageSize, Math.max(0, runtime.availableRows - offset))
+      const loaded = previewLoadedRef.current[tabId]
+      const loadedRows =
+        loaded?.sessionId === update.sessionId &&
+        loaded.offset === offset &&
+        loaded.limit === target.pageSize
+          ? loaded.rowCount
+          : -1
+      const shownColumns = panesRef.current
+        .flatMap((p) => p.tabs)
+        .find((t) => t.id === tabId)?.result?.columns
+      const columnsChanged =
+        !!shownColumns &&
+        JSON.stringify(shownColumns.map((c) => [c.name, c.type])) !==
+          JSON.stringify(runtime.columns.map((c) => [c.name, c.type]))
+      if (loadedRows >= 0) {
+        const shownResult = panesRef.current
+          .flatMap((p) => p.tabs)
+          .find((t) => t.id === tabId)?.result
+        if (shownResult && shownResult.rowCount === loadedRows)
+          updateActivePreviewTab(tabId, update.sessionId, {
+            result: previewPageResult(
+              runtime,
+              previewSqlRef.current[tabId] ?? shownResult.executedSql,
+              shownResult.rows
+            )
+          })
+      }
+      // 현재 페이지에 새로 append된 행이 교차할 때만 다시 읽는다. 완료 0행도 컬럼/상태 표시용으로 1회 읽는다.
+      if (loadedRows !== expectedRows || columnsChanged)
+        void loadPreviewPage(tabId, update.sessionId, target.page, target.pageSize)
+    },
+    [loadPreviewPage, updateActivePreviewTab]
+  )
   // 포커스 pane의 활성 탭 지정
   const setFocusedActive = (tabId: string): void =>
     setPanes((prev) => prev.map((p) => (p.id === focusedPane.id ? { ...p, activeTabId: tabId } : p)))
@@ -228,6 +474,7 @@ export default function App(): JSX.Element {
     const active = activeTabOf(focusedPane)
     const built = build()
     if (active && isDisposable(active)) {
+      if (active.preview?.sessionId) disposePreviewTab(active.id, active.preview.sessionId)
       const replaced: EditorTab = {
         ...built,
         id: active.id,
@@ -292,6 +539,16 @@ export default function App(): JSX.Element {
     })
   }, [])
 
+  // Preview nextUri 소비는 Main process가 계속하고, Renderer는 수신 가능 행 수와 현재 로컬 페이지만 동기화한다.
+  useEffect(() => {
+    return api.onPreviewUpdate((update) => {
+      const entry = Object.entries(activePreviewSessionRef.current).find(
+        ([, sessionId]) => sessionId === update.sessionId
+      )
+      if (entry) applyPreviewUpdate(entry[0], update)
+    })
+  }, [applyPreviewUpdate])
+
   // 토스트 자동 소멸
   useEffect(() => {
     if (!toast) return
@@ -353,6 +610,29 @@ export default function App(): JSX.Element {
       }))
     )
   }, [selectedHostId, hosts])
+
+  // Preview 세션을 시작한 host와 탭의 현재 host가 달라지면 이전 쿼리/임시 결과를 정리한다.
+  useEffect(() => {
+    for (const [tabId, sessionId] of Object.entries(activePreviewSessionRef.current)) {
+      const tab = panes.flatMap((p) => p.tabs).find((t) => t.id === tabId)
+      if (
+        !tab?.preview ||
+        tab.preview.sessionId !== sessionId ||
+        tab.hostId !== previewHostRef.current[tabId]
+      ) {
+        disposePreviewTab(tabId, sessionId)
+        if (tab?.preview)
+          updateTab(tabId, {
+            result: null,
+            error: null,
+            errorInfo: null,
+            running: false,
+            progress: null,
+            preview: { ...tab.preview, page: 0, sessionId: null }
+          })
+      }
+    }
+  }, [panes, disposePreviewTab, updateTab])
 
   // library 변경 시: 삭제된 저장 쿼리에 바인딩된 탭은 스크래치로 변환(작업 보존, 모든 pane).
   // 라이브러리 최초 로드 전에는 건너뛴다 — 복원된 바인딩 탭이 빈 초기 library로 오변환되는 것 방지.
@@ -446,7 +726,8 @@ export default function App(): JSX.Element {
     if (!owner) return
     const tab = owner.tabs.find((t) => t.id === id)
     // 실행 중 탭이면 서버 쿼리부터 취소(리소스 정리)
-    if (tab?.running && tab.requestId) void api.cancelQuery(tab.requestId)
+    if (tab?.preview?.sessionId) disposePreviewTab(tab.id, tab.preview.sessionId)
+    else if (tab?.running && tab.requestId) void api.cancelQuery(tab.requestId)
 
     // 창의 마지막 탭 + 분할 상태면 그 창을 접어 1분할로 되돌린다
     const collapse = owner.tabs.length === 1 && panes.length > 1
@@ -487,8 +768,7 @@ export default function App(): JSX.Element {
     tabId: string,
     sqlText: string,
     hostId: string,
-    recordHistory = true,
-    previewCommit: PreviewCommit | null = null
+    recordHistory = true
   ): Promise<void> => {
     const id = crypto.randomUUID()
     updateTab(tabId, { running: true, requestId: id, error: null, errorInfo: null, progress: null })
@@ -496,30 +776,6 @@ export default function App(): JSX.Element {
       const res = await api.runQuery({ hostId, sql: sqlText, requestId: id, recordHistory })
       if (res.ok) {
         updateTab(tabId, { result: res.value, error: null, errorInfo: null })
-        // 프리뷰: 실제 실행 성공 시에만 run SQL + 필터/페이지/정렬 스냅샷 커밋
-        // → prod 확인취소·에러 시 거짓 "적용됨"·거짓 페이지 이동 방지
-        if (previewCommit !== null) {
-          setPanes((prev) =>
-            prev.map((p) => ({
-              ...p,
-              tabs: p.tabs.map((t) =>
-                t.id === tabId && t.preview
-                  ? {
-                      ...t,
-                      sql: sqlText,
-                      baseSql: sqlText,
-                      preview: {
-                        ...t.preview,
-                        appliedFilters: previewCommit.appliedFilters,
-                        page: previewCommit.page,
-                        orderBy: previewCommit.orderBy
-                      }
-                    }
-                  : t
-              )
-            }))
-          )
-        }
         if (recordHistory) void refreshMetadata(hostId)
       } else updateTab(tabId, { error: res.error, errorInfo: res.errorInfo ?? null, result: null })
     } catch (e) {
@@ -534,11 +790,10 @@ export default function App(): JSX.Element {
     tabId: string,
     sqlText: string,
     hostId: string,
-    recordHistory = true,
-    previewCommit: PreviewCommit | null = null
+    recordHistory = true
   ): void => {
     const doExecute = (): void => {
-      void executeQuery(tabId, sqlText, hostId, recordHistory, previewCommit)
+      void executeQuery(tabId, sqlText, hostId, recordHistory)
     }
     // prod로 지정 + 옵트인한 연결이면 실행 전 확인(로컬 host.env 조회만 — 서버 호출 없음)
     const host = hosts.find((h) => h.id === hostId)
@@ -588,25 +843,129 @@ export default function App(): JSX.Element {
     if (t?.requestId) void api.cancelQuery(t.requestId)
   }
 
-  // ----- 테이블 프리뷰(#54): recordHistory:false로 history·학습·그리드 무오염 -----
+  // ----- 테이블 프리뷰(#54): 단일 nextUri 스트림 + Main 로컬 저장소 페이지 -----
   const previewTab = (paneId: string): EditorTab | undefined => {
     const t = paneOf(paneId) && activeTabOf(paneOf(paneId)!)
     return t && t.preview ? t : undefined
   }
-  // 재조회 헬퍼: 주어진 filters/limit/page/orderBy로 SQL 조립 + 실행 성공 시 커밋(거짓 이동 방지)
-  const rerunPreview = (
+
+  const startPreviewSession = (
     t: EditorTab,
     filters: PreviewFilter[],
-    limit: number,
-    page: number,
+    maxRows: number,
     orderBy: OrderBy | null
   ): void => {
     if (!t.preview || !t.hostId) return void (!t.hostId && setToast('연결을 먼저 선택하세요.'))
+    const requestedFilters = t.preview.filters
     const applied = filters.filter((f) => f.enabled !== false && buildPredicate(f) !== null)
-    const cols = t.result?.columns ?? []
-    const sql = buildPreviewSql(t.preview, applied, limit, page, orderBy, cols)
-    runFresh(t.id, sql, t.hostId, false, { appliedFilters: applied, page, orderBy })
+    const safeMaxRows = MAX_ROWS_PRESETS.includes(maxRows) ? maxRows : DEFAULT_MAX_ROWS
+    const sql = buildPreviewSql(t.preview, applied, safeMaxRows, orderBy)
+
+    const doStart = (requireMounted: boolean): void => {
+      const mounted = panesRef.current.flatMap((p) => p.tabs).find((tab) => tab.id === t.id)
+      // disposable 탭 교체 직후에는 React state가 아직 이전 scratch/Preview를 가리킬 수 있다.
+      // 같은 host·table로 실제 mount된 탭만 채택하고, 즉시 실행 경로는 방금 만든 탭을 사용한다.
+      const current = resolvePreviewStartTarget(mounted, t, requireMounted)
+      if (!current?.preview || !current.hostId) return
+      const currentPreview = current.preview
+      if (requireMounted && current.hostId !== t.hostId) return void setToast('연결이 바뀌어 Preview를 실행하지 않았습니다.')
+      if (requireMounted && currentPreview.sessionId !== t.preview?.sessionId)
+        return void setToast('Preview 상태가 바뀌어 이전 확인을 실행하지 않았습니다.')
+
+      const oldSessionId = activePreviewSessionRef.current[current.id]
+      if (oldSessionId) disposePreviewTab(current.id, oldSessionId)
+
+      const sessionId = crypto.randomUUID()
+      const initial: PreviewRuntime = {
+        sessionId,
+        state: 'starting',
+        columns: current.result?.columns ?? [],
+        availableRows: 0,
+        storedBytes: 0
+      }
+      activePreviewSessionRef.current[current.id] = sessionId
+      previewSqlRef.current[current.id] = sql
+      previewHostRef.current[current.id] = current.hostId
+      previewPageTargetRef.current[current.id] = {
+        sessionId,
+        page: 0,
+        pageSize: currentPreview.pageSize
+      }
+      delete previewLoadedRef.current[current.id]
+      previewRuntimeRef.current[current.id] = initial
+      setPreviewRuntimeByTab((prev) => ({ ...prev, [current.id]: initial }))
+      updateTab(current.id, {
+        sql,
+        baseSql: sql,
+        result: previewPageResult(initial, sql, []),
+        error: null,
+        errorInfo: null,
+        running: true,
+        requestId: null,
+        progress: null,
+        preview: {
+          ...currentPreview,
+          filters: requestedFilters,
+          maxRows: safeMaxRows,
+          appliedFilters: applied,
+          page: 0,
+          orderBy,
+          sessionId
+        }
+      })
+
+      const failStart = (error: string, errorInfo: EditorTab['errorInfo'] = null): void => {
+        if (activePreviewSessionRef.current[current.id] !== sessionId) return
+        // start IPC 자체가 실패하면 Main에 세션이 없을 수 있다. phantom ownership과 거짓 적용
+        // 스냅샷을 버리고, 직전 페이지는 읽기 전용으로 남겨 재시도 맥락을 보존한다.
+        disposePreviewTab(current.id, sessionId)
+        updateTab(current.id, {
+          sql: current.sql,
+          baseSql: current.baseSql,
+          result: current.result,
+          error,
+          errorInfo,
+          running: false,
+          requestId: null,
+          progress: null,
+          preview: {
+            ...currentPreview,
+            filters: requestedFilters,
+            sessionId: null
+          }
+        })
+      }
+
+      void (async () => {
+        try {
+          const res = await api.startPreview({
+            sessionId,
+            hostId: current.hostId as string,
+            sql,
+            maxRows: safeMaxRows
+          })
+          if (activePreviewSessionRef.current[current.id] !== sessionId) return
+          if (res.ok) applyPreviewUpdate(current.id, res.value)
+          else failStart(res.error, res.errorInfo ?? null)
+        } catch (e) {
+          failStart(e instanceof Error ? e.message : String(e))
+        }
+      })()
+    }
+
+    const host = hosts.find((h) => h.id === t.hostId)
+    if (host?.env === 'prod' && host.confirmBeforeRun) {
+      askConfirm({
+        title: 'PROD 연결 실행',
+        message: `'${host.name}'은 prod로 지정된 연결입니다. 이 문장을 실행할까요?`,
+        extra: <div className="sql-preview">{sql}</div>,
+        confirmLabel: '실행',
+        danger: true,
+        onConfirm: () => doStart(true)
+      })
+    } else doStart(false)
   }
+
   const openTablePreview = (catalog: string, schema: string, table: string): void => {
     const h = browserPanelHostId
     if (!h) return void setToast('연결을 먼저 선택하세요.')
@@ -628,52 +987,86 @@ export default function App(): JSX.Element {
     }
     const tab = openOrReplaceInFocused(() => makePreview({ catalog, schema, table }, h))
     updateTab(tab.id, { title: table }) // disposable 교체 시 제목 유지되는 걸 테이블명으로 강제
-    rerunPreview(tab, [], tab.preview!.limit, 0, null) // 초기: 필터 없음·page 0·기본 정렬(ORDER BY 1)
+    startPreviewSession(tab, [], tab.preview!.maxRows, null)
   }
-  // 조회(⌘↵/Enter/대기칩): 라이브 필터 적용 + 현재 limit/orderBy, page 0
+
+  // 조회(⌘↵/Enter/대기칩): 라이브 필터를 적용한 새 스트림, page 0.
   const runPreview = (paneId: string): void => {
     const t = previewTab(paneId)
     if (!t || t.running) return
-    rerunPreview(t, t.preview!.filters, t.preview!.limit, 0, t.preview!.orderBy)
+    startPreviewSession(t, t.preview!.filters, t.preview!.maxRows, t.preview!.orderBy)
   }
-  // LIMIT 변경 = 페이지 크기 변경 → 즉시 재조회(page 0), 적용 스냅샷 기준
-  const changePreviewLimit = (paneId: string, limit: number): void => {
+
+  // 페이지 크기는 현재 세션의 로컬 뷰만 page 0으로 다시 읽는다.
+  const changePreviewPageSize = (paneId: string, pageSize: number): void => {
     const t = previewTab(paneId)
     if (!t) return
-    updateTab(t.id, { preview: { ...t.preview!, limit } })
-    if (!t.running) rerunPreview(t, t.preview!.appliedFilters ?? [], limit, 0, t.preview!.orderBy)
+    const size = Number.isFinite(pageSize) ? Math.max(1, Math.min(10000, Math.floor(pageSize))) : 500
+    const sessionId = activePreviewSessionRef.current[t.id]
+    const runtime = previewRuntimeRef.current[t.id]
+    delete previewLoadedRef.current[t.id]
+    updateTab(t.id, {
+      preview: { ...t.preview!, pageSize: size, page: 0 },
+      result:
+        runtime && runtime.sessionId === sessionId
+          ? previewPageResult(runtime, previewSqlRef.current[t.id] ?? t.sql, [])
+          : null
+    })
+    if (sessionId) void loadPreviewPage(t.id, sessionId, 0, size)
   }
-  // 정렬(헤더 클릭) → 서버 ORDER BY 승격, page 0, 적용 스냅샷 기준
+
+  const changePreviewMaxRows = (paneId: string, maxRows: number): void => {
+    const t = previewTab(paneId)
+    if (!t || t.running) return
+    startPreviewSession(t, t.preview!.appliedFilters ?? [], maxRows, t.preview!.orderBy)
+  }
+
+  // 정렬(헤더 클릭) → 명시적 ORDER BY를 가진 새 스트림.
   const setPreviewSort = (paneId: string, column: string, dir: 'asc' | 'desc'): void => {
     const t = previewTab(paneId)
-    if (!t || t.running) return
-    rerunPreview(t, t.preview!.appliedFilters ?? [], t.preview!.limit, 0, { column, dir })
+    if (!t) return
+    startPreviewSession(t, t.preview!.appliedFilters ?? [], t.preview!.maxRows, { column, dir })
   }
-  // 페이지 이동 = 적용 스냅샷 + orderBy + 새 page(라이브 미적용 필터는 안 끌어옴)
+
+  // 이미 Main process에 저장된 행만 읽는 로컬 페이지 이동. 실행 중에도 가능하다.
   const goToPreviewPage = (paneId: string, delta: number): void => {
     const t = previewTab(paneId)
-    if (!t || t.running) return
+    if (!t) return
     const page = Math.max(0, t.preview!.page + delta)
-    rerunPreview(t, t.preview!.appliedFilters ?? [], t.preview!.limit, page, t.preview!.orderBy)
+    const sessionId = activePreviewSessionRef.current[t.id]
+    const runtime = previewRuntimeRef.current[t.id]
+    if (!sessionId || !runtime || page === t.preview!.page) return
+    // 호출자가 UI disabled 상태를 우회해도 첫 행이 저장되지 않은 다음 페이지로는 이동하지 않는다.
+    if (page > t.preview!.page && runtime.availableRows <= page * t.preview!.pageSize) return
+    delete previewLoadedRef.current[t.id]
+    updateTab(t.id, {
+      preview: { ...t.preview!, page },
+      result: previewPageResult(runtime, previewSqlRef.current[t.id] ?? t.sql, [])
+    })
+    void loadPreviewPage(t.id, sessionId, page, t.preview!.pageSize)
   }
+
   const clearPreviewFilters = (paneId: string): void => {
     const t = previewTab(paneId)
     if (!t || t.running || !t.hostId) return
-    updateTab(t.id, { preview: { ...t.preview!, filters: [] } }) // 필터 목록만 즉시 비움(로컬)
-    rerunPreview(t, [], t.preview!.limit, 0, t.preview!.orderBy)
+    updateTab(t.id, { preview: { ...t.preview!, filters: [] } })
+    startPreviewSession({ ...t, preview: { ...t.preview!, filters: [] } }, [], t.preview!.maxRows, t.preview!.orderBy)
   }
+
+  const cancelPreviewInPane = (paneId: string): void => {
+    const t = previewTab(paneId)
+    const sessionId = t && activePreviewSessionRef.current[t.id]
+    if (t && sessionId)
+      void api.cancelPreview(sessionId).catch((e) => {
+        if (activePreviewSessionRef.current[t.id] !== sessionId) return
+        setToast(e instanceof Error ? e.message : String(e))
+      })
+  }
+
   const openPreviewInEditor = (paneId: string): void => {
     const t = previewTab(paneId)
     if (!t) return
-    const cols = t.result?.columns ?? []
-    const sql = buildPreviewSql(
-      t.preview!,
-      t.preview!.filters,
-      t.preview!.limit,
-      t.preview!.page,
-      t.preview!.orderBy,
-      cols
-    )
+    const sql = buildPreviewSql(t.preview!, t.preview!.filters, t.preview!.maxRows, t.preview!.orderBy)
     addTabToPane(paneId, makeScratch(sql, t.hostId, nextUntitled(allTitles())))
   }
   // 그리드 우클릭 "필터 추가"/"이 값으로 필터" → 프리뷰 필터 행 추가(값 프리필, 자동 실행 안 함)
@@ -1222,32 +1615,29 @@ export default function App(): JSX.Element {
     const split = panes.length > 1
     // 프리뷰 탭은 상단(필터) 내용 높이 + 결과가 나머지 가득(고정 분할·v-splitter 없음)
     const isPreview = !!pa?.preview
-    // 프리뷰 페이저: 총 개수 조회 없음 → 이번 페이지가 정확히 pageSize행이고 OFFSET 상한 이내면 "다음" 가능
     const pv = pa?.preview ?? null
+    const runtimeForTab = pa ? previewRuntimeByTab[pa.id] : undefined
+    const pvRuntime =
+      pv?.sessionId && runtimeForTab?.sessionId === pv.sessionId ? runtimeForTab : undefined
     const pvCols = pa?.result?.columns ?? []
-    const pvPageSize = pv?.limit ?? 0
+    const pvPageSize = pv?.pageSize ?? 0
     const pvRowCount = pa?.result?.rowCount ?? 0
     const pvPage = pv?.page ?? 0
-    const pvSortIdx = pv?.orderBy ? Math.max(0, pvCols.findIndex((c) => c.name === pv.orderBy!.column)) : 0
+    const pvSortIdx = pv?.orderBy
+      ? pvCols.findIndex((c) => c.name === pv.orderBy!.column)
+      : -1
     const pager =
-      isPreview && pa?.result
+      isPreview && pa?.result && pv && pvRuntime
         ? {
-            page: pvPage,
-            rangeFrom: pvRowCount ? pvPage * pvPageSize + 1 : 0,
-            rangeTo: pvPage * pvPageSize + pvRowCount,
-            canPrev: pvPage > 0 && !pa.running,
-            canNext:
-              !pa.running &&
-              pvRowCount === pvPageSize &&
-              !pa.result.truncated &&
-              (pvPage + 1) * pvPageSize <= PREVIEW_OFFSET_CAP,
-            // 다음 행은 더 있지만 OFFSET 상한이라 막힘 → WHERE로 좁히도록 안내
-            atCap:
-              pvRowCount === pvPageSize &&
-              !pa.result.truncated &&
-              (pvPage + 1) * pvPageSize > PREVIEW_OFFSET_CAP,
-            sortLabel: pv?.orderBy?.column ?? pvCols[0]?.name ?? '',
-            sortDir: (pv?.orderBy?.dir ?? 'asc') as 'asc' | 'desc'
+            ...derivePreviewPager({
+              state: pvRuntime.state,
+              availableRows: pvRuntime.availableRows,
+              page: pvPage,
+              pageSize: pvPageSize,
+              currentRows: pvRowCount
+            }),
+            sortLabel: pv.orderBy?.column,
+            sortDir: pv.orderBy?.dir
           }
         : undefined
     return (
@@ -1291,9 +1681,10 @@ export default function App(): JSX.Element {
             onChangeFilters={(filters) =>
               updateTab(pa.id, { preview: { ...pa.preview!, filters } })
             }
-            onChangeLimit={(limit) => changePreviewLimit(pane.id, limit)}
+            onChangePageSize={(pageSize) => changePreviewPageSize(pane.id, pageSize)}
+            onChangeMaxRows={(maxRows) => changePreviewMaxRows(pane.id, maxRows)}
             onRun={() => runPreview(pane.id)}
-            onCancel={() => cancelInPane(pane.id)}
+            onCancel={() => cancelPreviewInPane(pane.id)}
             onClear={() => clearPreviewFilters(pane.id)}
             onOpenInEditor={() => openPreviewInEditor(pane.id)}
           />
@@ -1346,15 +1737,31 @@ export default function App(): JSX.Element {
           errorInfo={pa?.errorInfo ?? null}
           running={pa?.running ?? false}
           progress={pa?.progress ?? null}
-          onCancel={() => cancelInPane(pane.id)}
+          onCancel={() =>
+            isPreview ? cancelPreviewInPane(pane.id) : cancelInPane(pane.id)
+          }
           onAddFilter={
             pa?.preview ? (origIndex, value) => addPreviewFilter(pane.id, origIndex, value) : undefined
           }
           pager={pager}
           onPrevPage={() => goToPreviewPage(pane.id, -1)}
           onNextPage={() => goToPreviewPage(pane.id, 1)}
-          previewSort={isPreview ? { origIndex: pvSortIdx, dir: pv?.orderBy?.dir ?? 'asc' } : undefined}
+          previewSort={
+            isPreview && pv?.orderBy && pvSortIdx >= 0
+              ? { origIndex: pvSortIdx, dir: pv.orderBy.dir }
+              : undefined
+          }
           rowIndexOffset={isPreview ? pvPage * pvPageSize : 0}
+          streamingPreview={isPreview}
+          previewState={isPreview ? pvRuntime?.state : undefined}
+          previewAvailableRows={isPreview ? (pvRuntime?.availableRows ?? 0) : undefined}
+          resultKey={
+            pa
+              ? isPreview && pv
+                ? `${pv.sessionId ?? 'none'}:${pv.page}:${pv.pageSize}`
+                : `${pa.id}:${pa.result?.queryId ?? pa.requestId ?? (pa.result ? pa.sql : 'empty')}`
+              : 'empty-pane'
+          }
           onServerSort={
             isPreview
               ? (origIndex, dir) => {

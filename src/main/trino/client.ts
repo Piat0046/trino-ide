@@ -66,6 +66,55 @@ function buildTrino(conn: ResolvedConn): Trino {
   })
 }
 
+/** Preview처럼 결과를 직접 소비하는 호출자가 사용할 Trino 스트림 핸들. */
+export interface TrinoQueryStream {
+  pages: AsyncIterable<QueryResult>
+  queryId?: string
+  /** trino-client iterator가 for-await에서 건너뛰는 최초 POST 응답 */
+  initialResult?: QueryResult
+  cancel(queryId: string): Promise<void>
+}
+
+/** trino-client 0.2.x 내부 Iterator에서 최초 POST 응답을 얻는다. 실패하면 안전하게 생략한다. */
+export function initialQueryResult(iter: unknown): QueryResult | undefined {
+  const result = (iter as { iter?: { queryResult?: unknown } })?.iter?.queryResult
+  return result && typeof result === 'object' ? (result as QueryResult) : undefined
+}
+
+/**
+ * trino-client 0.2.x가 for-await에서 숨기는 최초 POST 응답을 맨 앞에 정확히 한 번 포함한다.
+ * 테스트/향후 client 교체에서 iterator가 같은 객체를 직접 내보내도 중복 처리하지 않는다.
+ */
+export async function* queryResultsIncludingInitial(
+  pages: AsyncIterable<QueryResult>,
+  initial: QueryResult | undefined = initialQueryResult(pages)
+): AsyncGenerator<QueryResult> {
+  if (initial) yield initial
+  for await (const page of pages) {
+    if (initial && page === initial) continue
+    yield page
+  }
+}
+
+/** SQL을 한 번 제출하고 nextUri를 따라갈 iterator를 그대로 노출한다. */
+export async function openQueryStream(conn: ResolvedConn, sql: string): Promise<TrinoQueryStream> {
+  const trino = buildTrino(conn)
+  const pages = await trino.query({
+    query: sql,
+    user: conn.user,
+    catalog: conn.catalog,
+    schema: conn.schema
+  })
+  return {
+    pages: pages as AsyncIterable<QueryResult>,
+    queryId: initialQueryId(pages),
+    initialResult: initialQueryResult(pages),
+    cancel: async (queryId: string) => {
+      await trino.cancel(queryId)
+    }
+  }
+}
+
 /** 구조화 정보를 보존하는 Trino 쿼리 에러. ipc 레이어가 errorInfo로 변환한다. */
 export class TrinoQueryError extends Error {
   errorName?: string
@@ -86,7 +135,7 @@ export class TrinoQueryError extends Error {
   }
 }
 
-function mapStats(s: QueryResult['stats']): QueryStatsSummary | undefined {
+export function mapQueryStats(s: QueryResult['stats']): QueryStatsSummary | undefined {
   return s
     ? {
         state: s.state,
@@ -135,6 +184,7 @@ export async function runQuery(
   // 본문에서만 잡던 token.trinoQueryId가 undefined로 남아 서버 취소(DELETE)가 스킵되던 버그를 막는다.
   const earlyId = initialQueryId(iter)
   if (earlyId) token.trinoQueryId = earlyId
+  const initial = initialQueryResult(iter)
 
   let columns: QueryResultPayload['columns'] = []
   const rows: unknown[][] = []
@@ -145,7 +195,7 @@ export async function runQuery(
   let warnings: string[] = []
   let infoUri: string | undefined
 
-  for await (const page of iter as AsyncIterable<QueryResult>) {
+  for await (const page of queryResultsIncludingInitial(iter as AsyncIterable<QueryResult>, initial)) {
     if (page.id) token.trinoQueryId = page.id
     if (page.infoUri && !infoUri) infoUri = page.infoUri
     if (page.warnings && page.warnings.length) warnings = page.warnings // 누적본(최신 페이지)
@@ -161,7 +211,7 @@ export async function runQuery(
     if (page.stats) {
       lastStats = page.stats
       if (onProgress) {
-        const mapped = mapStats(page.stats)
+        const mapped = mapQueryStats(page.stats)
         if (mapped) onProgress(mapped)
       }
     }
@@ -186,7 +236,7 @@ export async function runQuery(
     }
   }
 
-  const finalStats = mapStats(lastStats)
+  const finalStats = mapQueryStats(lastStats)
   if (finalStats && lastStats?.rootStage) finalStats.stages = flattenStages(lastStats.rootStage)
 
   return {

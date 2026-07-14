@@ -28,7 +28,7 @@ npm run dist:dir     # 패키징 없이 .app 디렉터리만 (빠른 확인용)
 CSC_IDENTITY_AUTO_DISCOVERY=false npm run dist
 ```
 
-`npm test`는 아직 없다(테스트 미도입).
+`npm test`는 Vitest로 Preview SQL·로컬 페이지 계산·Main process 세션/스풀 경계 조건을 검증한다.
 
 ### Electron 바이너리 주의
 `npm install` 후에도 Electron 실제 바이너리가 안 받아져 `dev`가 `Error: Electron uninstall`로 죽을 수 있다. 이때:
@@ -53,6 +53,7 @@ renderer (React)  ──IPC──▶  main process  ──HTTP──▶  Trino
 - `main/index.ts` — 앱 생명주기, BrowserWindow 생성. dev면 `ELECTRON_RENDERER_URL` 로드, 아니면 `out/renderer/index.html`.
 - `main/ipc.ts` — 모든 IPC 핸들러 등록. host 입력을 접속 정보(`ResolvedConn`)로 **복호화**하고, 실행 중 쿼리를 `requestId → {token, conn}` 맵으로 추적해 취소를 지원한다. `query:run`은 **성공/실패 모두 `history` 저장소에 자동 기록**하고, 사용자 SQL을 **재작성 없이 그대로 1회 실행**한다(아래 결과 수신).
 - `main/trino/client.ts` — `trino-client`로 쿼리 실행. `runQuery(conn, sql, token, rowLimit, onProgress?)`가 `trino.query()`의 async iterator(nextUri 페이징)를 돌며 columns/data/stats를 누적. `rowLimit`(기본 `SAFETY_CAP`=5만) 도달 시 서버 쿼리를 `cancel`하고 `truncated` 표시. **취소(#50)**: `token.trinoQueryId`를 **루프 진입 전** `initialQueryId(iter)`로 즉시 확보한다 — trino-client의 `QueryIterator.next()`가 무데이터 페이지를 내부 재귀로 삼켜 for-await 본문이 안 돌 수 있어, 본문에서만 id를 잡으면 무출력 쿼리에서 `query:cancel`이 서버 `DELETE`를 스킵해 중지가 안 먹던 버그를 막는다(`initialQueryId`는 `iter.iter.queryResult.id` 내부 구조 의존, 실패 시 undefined 폴백). **SQL은 재작성하지 않는다** — 원본을 그대로 실행한다(페이지네이션 헬퍼 `canPaginate`/`wrapPaginated` 등은 제거됨). 에러는 `TrinoQueryError`(errorName/errorType/errorCode + Trino 런타임 필드 `errorLocation`의 line/column 보존)로 던진다. `onProgress`는 페이지마다 stats를 흘려보내지만 **trino-client의 iterator가 `data`가 빈 stats-only 페이지를 내부에서 건너뛰므로**(`QueryIterator.next()` 재귀 skip) 진행 stats는 **데이터가 실린 페이지에서만** 스트리밍된다(계획/큐 단계는 안 옴 → 라이브 경과 타이머가 그 공백을 메운다).
+- `main/trino/previewSession.ts` — 테이블 Preview 전용 세션 관리자. SQL을 한 번 제출한 뒤 최초 POST 응답과 `nextUri` 스트림을 Main process가 끝까지 소비해 NDJSON 임시 파일에 append하고, Renderer에는 요청한 로컬 페이지 구간만 반환한다. 세션별 행 한도(1천/1만/5만), 256 MiB 저장 한도, 8 MiB 단일 행·16 MiB IPC 페이지 한도와 owner 기반 취소/정리를 적용한다.
 
 ### 결과 수신 (원본 SQL 1회 실행 + 클라이언트 페이지네이션) — #40
 - **SQL을 재작성하지 않는다.** `query:run`은 사용자가 쓴 문장을 **그대로 1회 실행**한다(OFFSET/LIMIT 주입·서브쿼리 래핑·페이지 재실행 **없음**). 근거: Trino `nextUri`는 단일 실행을 forward 스트리밍하는 커서라 재작성 없이 결과를 받아올 수 있고, 재작성 페이지네이션(구 "방식 B")은 정확성(ORDER BY 없을 때 페이지 간 행 중복/누락)·투명성(사용자 SQL≠전송 SQL)·서버 부하(OFFSET 재스캔) 모두에서 열등했다.
@@ -82,6 +83,7 @@ renderer (React)  ──IPC──▶  main process  ──HTTP──▶  Trino
     - **browse(찾아보기, 서버 라이브)**: 상단 **"← 등록됨"** 바 + 드릴다운 — 카탈로그 펼치면 `SHOW SCHEMAS FROM "cat"`, 스키마 펼치면 `SHOW TABLES FROM "cat"."sch"`(펼치기 = **명시 클릭 1회 = 서버 왕복 1회**). 최상위는 **"카탈로그 불러오기 · 서버 조회 1회" 버튼**만 트리거(탭 열기·host 변경·모드 스왑으론 조회 0). **비용 시그니처**: 미로드 확장노드 caret=앰버(`--warn`)→로드(캐시) 중립 + 캡션 + 노드 title 힌트. 테이블 hover `＋`/스키마 "전체"(로드된 미등록분 일괄, 추가 왕복 0) → `upsertMetadata`(manual) → home·Metadata·자동완성 반영, 이미 등록(manual)분 "등록됨"(대소문자 무시). 노드/카탈로그 새로고침(명시 1회).
     - **테이블 데이터 프리뷰(#54)**: home(등록됨) 트리 테이블 **더블클릭** → **전용 프리뷰 탭**(`EditorTab.preview` 변별자, `renderPane` 상단 슬롯을 `SqlEditor` 대신 `PreviewPane`로 스왑, **v-splitter+ResultsPane 그대로 재사용**). 즉시 `SELECT * FROM "cat"."sch"."tbl" LIMIT 500` 1회 실행. **SQL 숨김·에디터 미주입** — 상단은 [탭 스트립 + 컨트롤 바(테이블칩·LIMIT·조회·"SQL 편집기로 열기") + `FilterBar`]. **프리뷰 레이아웃**: 프리뷰 탭은 고정 분할·v-splitter 없이 **상단 크롬(툴바+필터)만 내용 높이, ResultsPane이 나머지를 가득**(`.ws-pane.preview-mode`). 조회/중지·필터 비우기·LIMIT·SQL 편집기로 열기는 **툴바 한 줄**로. **필터 바**(온디맨드 행 `[체크박스] 컬럼 | 조건 | 값 | 상태칩 | −`, AND): 0필터면 렌더 없음(결과가 위로 가득). **행 추가는 그리드 컬럼 우클릭 "필터 추가"/셀 "이 값으로 필터"로만 = 위쪽에 한 칸씩 prepend**(별도 ＋ 버튼 없음). 조건 8종(라벨은 부등호/영어: `=`/`≠`/`>`/`<`/`contains`/`not contains`/`starts with`/`ends with`; op 키 eq/ne/gt/lt/contains/ncontains/starts/ends는 불변). 그리드 헤더 **우클릭 "필터 추가"** / 셀 **"이 값으로 필터"**(`ResultsPane.onAddFilter`, 프리뷰 탭에만)로도 행 생성(값 프리필). **체크박스 off=그 조건 보존한 채 WHERE 제외**(`PreviewFilter.enabled`, `buildPreviewSql`이 skip). **행별 상태칩**(`FilterBar`, `PreviewSpec.appliedFilters` 스냅샷에서 파생 → 거짓 표시 없음): `✓ 적용됨`(틸 `--accent`, 마지막 조회에 실제 포함)·`● 대기`(앰버, 클릭=조회)·`꺼짐`·`값 입력`. 필터 하단 **푸터**(요약 `필터 N · 적용 M · 대기 K` + `필터 비우기`(`clearPreviewFilters`) + `조회`[변경대기 ●]/중지 — 조회/중지는 preview 툴바에서 이 푸터로 이동, 앱 전체 조회 버튼은 1개). **적용 = 명시 "조회"**(값 Enter/⌘↵/대기칩 클릭) — 값 편집·체크·행 추가/삭제는 **서버 0**, 자동/디바운스 **없음**, 변경 대기 `●`(현재 필터/LIMIT SQL ≠ 마지막 실행 SQL). 이미지(TablePlus 스타일) 인터랙션 채택, 전 컬럼 자동나열·행별 개별쿼리·하단 Export/SQL·단축키 레전드는 과설계로 제외(사용자 확정: 온디맨드·틸). **LIMIT** 100/500/1000/5000/10000(=페이지 크기, 바꾸면 즉시 page 0 재조회). **페이지네이션(프리뷰 한정)**: 결과 하단 `.transport`에 `◀ 페이지 N ▶ · a–b행 · 정렬 col ▲`(`ResultsPane.pager`). **정렬 기반·정확**(#40의 "OFFSET 없음"은 *사용자 작성 SQL 결과*엔 그대로 유지, 프리뷰는 우리가 SQL을 생성하므로 예외): 페이지는 `… ORDER BY … LIMIT n OFFSET n*page`. **정렬 승격** — 프리뷰에선 그리드 헤더 클릭이 서버 ORDER BY로 승격(`ResultsPane.onServerSort`, 클라 정렬 비활성)해 page 0 리셋. `orderBy` 지정 시 `"col" dir` + 나머지 **정렬가능 컬럼 tiebreaker**(총순서 → 경계 중복/누락 없음; ROW/MAP 등 비정렬 타입 제외 `isOrderable`, 비정렬 컬럼 헤더 클릭은 no-op+토스트). **미정렬 기본**도 정렬가능 컬럼 **ordinal 총순서**(`ORDER BY 1, 2, …` — result.columns 있으면 tiebreaker 포함해 경계 정확). 단 **첫 조회**는 컬럼명을 몰라 `ORDER BY 1`(첫 컬럼)로 폴백 → 그 첫 렌더~첫 Next의 0↔1 경계만 동점에서 약하게 흔들릴 수 있음(이후 페이지는 총순서). **마지막 판정**: COUNT 없음 — 이번 페이지가 정확히 pageSize행+`OFFSET 상한 PREVIEW_OFFSET_CAP(10,000)` 이내면 "다음" 활성(상한 초과 시 "WHERE로 좁히세요"). **커밋-온-성공**: page/orderBy도 실행 성공 시에만(prod 취소·에러 시 거짓 이동 방지). Prev/Next·정렬·LIMIT는 **적용 스냅샷(appliedFilters) 기준**으로 조립(라이브 미적용 필터 안 끌어옴)·즉시 재조회(staged 아님). 페이지당 서버 왕복 1회(옵트인 라벨). `PreviewSpec.page/orderBy` 추가. **안전 변환 `lib/previewQuery.ts`(순수 함수 — 인젝션 이스케이프를 개발 중 헤드리스로 확인, 커밋된 테스트는 없음)**: `buildPreviewSql`/`buildPredicate` = `quoteIdent`(식별자) + 값 이스케이프(`'`→`''`·숫자컬럼+숫자값만 raw·`DATE`/`TIMESTAMP` 리터럴) + LIKE `%_\` 이스케이프+`ESCAPE '\'`, 비문자 컬럼 `CAST(col AS varchar) LIKE` → 인젝션 차단. **실행은 `runFresh(…, recordHistory=false)`** → history·자동학습·메인 그리드 무오염(prod 확인 다이얼로그는 공유). 프리뷰 탭은 `isDirty=false`(닫기 확인·저장 없음), 세션 복원 시 `preview` 미직렬화 → 마지막 SELECT를 담은 **SQL 스크래치로 degrade**(자동 재실행 0). 같은 테이블 재열기는 **open-or-focus**. "SQL 편집기로 열기"=컴파일 SELECT를 새 스크래치 탭으로(탈출구). **렌더러 전용**(main/ipc/preload/shared 무변경). ResultsPane 전량 재사용(정렬·복사·내보내기·에러카드·run-overlay·인스펙터).
     - **캐시**: App `browseCache`(host별, 세션 한정) → 섹션 전환·모드 스왑·재펼침 시 서버 0. **실행 `query:run(recordHistory:false)` 재사용** — history·자동학습·메인 그리드 무오염(main/ipc/preload/shared 무변경). SQL 조립·인용(`"`→`""`)·파싱은 `lib/showQueries.ts` 순수함수. 인플라이트 SHOW는 host 전환 시 requestId 가드로 무효화. **자동/폴링 없음**. Metadata 탭 = learned 코퍼스+manual+위생/CRUD(자동완성 구동), Browser = manual 큐레이트 + 서버 발견 — 역할 분리(#52 재설계, 사용자 확정 "등록됨 기본 + 찾아보기").
+    - **테이블 Preview 스트리밍(현재 구현; 위 OFFSET 설계를 대체)**: 서버에는 `WHERE`/사용자가 명시한 `ORDER BY`/전체 행 `LIMIT`을 포함한 SQL을 **한 번만** 제출한다. Main process가 최초 응답과 `nextUri`를 eager 소비해 private NDJSON temp spool에 저장하고, 페이지 이동·페이지 크기 변경은 저장된 행에 대한 로컬 IPC 읽기만 수행한다(`OFFSET`·기본 `ORDER BY`·페이지별 재실행 없음). 페이지 크기(1/100/500/1000/5000/10000, 기본 500; 1행은 대형 행 복구용)와 전체 행 한도(1000/10000/50000, 기본 10000)는 독립이다. 필터 적용·전체 한도 변경·헤더 정렬만 기존 세션을 정리하고 새 스트림을 시작한다. 상태는 `starting/running/finished/cancelled/failed/row_limit/size_limit`로 구분하며 탭/창/앱 종료 시 서버 취소와 temp 정리를 best-effort로 수행한다.
   - `HostList` (연결 목록/선택/편집/삭제) — 추가는 헤더 +, 선택은 `App.selectedHostId` 갱신(에디터 툴바 드롭다운과 동기).
   - `HistoryList` (실행 기록; **클릭=에디터 로드, 더블클릭=재실행**, 삭제된 host는 표시만)
   - `SavedPanel` (폴더 트리; 쿼리 **클릭=로드/더블클릭=실행**·이름변경·삭제. 폴더 생성은 헤더 +)
@@ -111,7 +113,7 @@ renderer (React)  ──IPC──▶  main process  ──HTTP──▶  Trino
 - 폰트: UI=**Inter**, 코드/데이터/수치=**JetBrains Mono**(`@fontsource/*`, `main.tsx`에서 import해 오프라인 번들). 데이터 그리드·통계·에디터는 mono.
 
 ### IPC 계약
-대부분 채널은 `ipcRenderer.invoke`(요청/응답)이나 **`query:progress`만 단방향 이벤트**(main→renderer). 쿼리/테스트는 throw 대신 `IpcResult<T>`(`{ok,value} | {ok,error,errorInfo?}`)로 실패를 표현한다(`errorInfo`는 구조화 에러).
+대부분 채널은 `ipcRenderer.invoke`(요청/응답)이고 `query:progress`와 `preview:update`는 단방향 이벤트(main→renderer)다. 쿼리/테스트는 throw 대신 `IpcResult<T>`(`{ok,value} | {ok,error,errorInfo?}`)로 실패를 표현한다(`errorInfo`는 구조화 에러).
 
 | 채널 | 인자 → 반환 |
 |------|------|
@@ -121,7 +123,11 @@ renderer (React)  ──IPC──▶  main process  ──HTTP──▶  Trino
 | `hosts:test` | `HostInput` → `IpcResult<QueryResultPayload>` (SELECT 1) |
 | `query:run` | `RunQueryRequest{hostId,sql,requestId}` → `IpcResult<QueryResultPayload>` (실행 시 자동 history 기록) |
 | `query:cancel` | `requestId` → void |
-| `query:progress` | **(이벤트, main→renderer `webContents.send`)** `QueryProgress{requestId,stats}` — 유일한 단방향 push 채널. preload `onQueryProgress(cb)`로 구독(해제 함수 반환) |
+| `query:progress` | **(이벤트, main→renderer `webContents.send`)** `QueryProgress{requestId,stats}`. preload `onQueryProgress(cb)`로 구독(해제 함수 반환) |
+| `preview:start` | `StartPreviewRequest{sessionId,hostId,sql,maxRows}` → `IpcResult<PreviewSessionUpdate>` |
+| `preview:getPage` | `GetPreviewPageRequest{sessionId,offset,limit}` → `IpcResult<PreviewPage>` (로컬 temp spool 읽기) |
+| `preview:cancel` / `preview:dispose` | `sessionId` → void (호출 Renderer owner만 허용) |
+| `preview:update` | **(이벤트, main→renderer `webContents.send`)** `PreviewSessionUpdate`. preload `onPreviewUpdate(cb)`로 구독 |
 | `history:list` | → `HistoryEntry[]` (최신순) |
 | `history:delete` | `id` → void |
 | `history:clear` | → void |
